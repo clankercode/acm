@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -28,6 +29,7 @@ def version(name: str) -> str:
 
 log = logging.getLogger("ccm.server")
 
+
 def web_dist() -> Path | None:
     """The built dashboard: the checkout's copy first, then the wheel's.
 
@@ -38,6 +40,48 @@ def web_dist() -> Path | None:
         if (candidate / "index.html").is_file():
             return candidate
     return None
+
+
+def build_identity() -> dict:
+    """What code this process is running, as one comparable string.
+
+    A long-lived dashboard tab outlives upgrades: ``just update`` reinstalls the
+    wheel and restarts the unit while the browser is still holding the old
+    bundle, whose asset URLs the new build no longer serves. The tab needs to
+    know to reload itself, so every snapshot carries this and the client compares
+    it with the one it started on.
+
+    The digest covers the built UI -- its ``index.html`` names the hashed asset
+    files, so any rebuild changes it -- and the contents of the Python sources,
+    which is what moves when a server-only change is installed under an unchanged
+    version. Contents rather than mtimes: wheel installs take their timestamps
+    from the zip entries, which reproducible builds pin, so a real upgrade can
+    land with the mtimes it replaced. It also means the opposite mistake is
+    avoided -- a touch, a reinstall of identical files, or a branch switched away
+    and back is not an update. Deliberately not the process start time either: a
+    plain restart on identical code serves the same bundle, and prompting for
+    that would train people to ignore the prompt.
+
+    The whole package is a few hundred kilobytes and this is read once per
+    process, so hashing it outright is cheaper than being clever about it.
+    """
+    h = hashlib.sha256()
+    h.update(version("ccm").encode())
+    dist = web_dist()
+    if dist is not None:
+        try:
+            h.update((dist / "index.html").read_bytes())
+        except OSError:  # pragma: no cover -- raced with a rebuild
+            pass
+    for path in sorted(PACKAGE_ROOT.rglob("*.py")):
+        try:
+            # Path included, and relative to the package: two modules can hold
+            # identical bytes, and one moving between subpackages is a change.
+            h.update(path.relative_to(PACKAGE_ROOT).as_posix().encode())
+            h.update(path.read_bytes())
+        except OSError:  # pragma: no cover -- raced with an install
+            pass
+    return {"version": version("ccm"), "id": h.hexdigest()[:16]}
 
 
 class ORJSONResponse(JSONResponse):
@@ -103,6 +147,13 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
         lifespan=lifespan,
     )
     app.state.engine = engine
+    # Read once: the answer only changes when the process is replaced, and this
+    # rides along on every snapshot and every stream reconnect.
+    app.state.build = build_identity()
+
+    def snapshot() -> dict:
+        """The engine's view plus which build served it."""
+        return {**engine.snapshot(), "build": app.state.build}
 
     def filters_from(request: Request) -> A.Filters:
         q = request.query_params
@@ -121,7 +172,7 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
 
     @app.get("/api/state")
     def get_state() -> dict:
-        return engine.snapshot()
+        return snapshot()
 
     @app.get("/api/totals")
     def get_totals(request: Request) -> dict:
@@ -329,11 +380,24 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
 
     @app.post("/api/rescan")
     def post_rescan(full: bool = False) -> dict:
+        # Refused rather than queued while paused: a full rescan drops the
+        # derived tables, so honouring it now would empty the dashboard and
+        # leave nothing running to refill it.
+        if engine.paused:
+            raise HTTPException(409, "scanning is paused")
         if full:
             engine.rescan_from_scratch()
         else:
             engine.request_scan()
         return {"ok": True, "full": full}
+
+    @app.post("/api/scan/pause")
+    def post_pause() -> dict:
+        return {"paused": engine.set_paused(True)}
+
+    @app.post("/api/scan/resume")
+    def post_resume() -> dict:
+        return {"paused": engine.set_paused(False)}
 
     # -- live stream --------------------------------------------------------
 
@@ -344,7 +408,7 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
 
         async def gen():
             try:
-                yield sse("hello", engine.snapshot())
+                yield sse("hello", snapshot())
                 while True:
                     if await request.is_disconnected():
                         break

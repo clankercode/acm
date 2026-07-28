@@ -57,6 +57,11 @@ class Engine:
         self._sub_lock = threading.Lock()
         self._wake = threading.Event()
         self._stop = threading.Event()
+        self._paused = threading.Event()
+        # Pause is a read-modify-write over two pieces of state, and the
+        # endpoints that drive it run on the threadpool, so two clicks or two
+        # tabs really do arrive at once.
+        self._pause_lock = threading.Lock()
         self._worker: threading.Thread | None = None
         self._watchers: list = []
         self._watch_lock = threading.Lock()
@@ -128,6 +133,48 @@ class Engine:
         """Ask the worker to make another pass as soon as it can."""
         self._wake.set()
 
+    # -- pause -------------------------------------------------------------
+
+    @property
+    def paused(self) -> bool:
+        return self._paused.is_set()
+
+    def set_paused(self, paused: bool) -> bool:
+        """Stop or restart the scan loop.
+
+        Reading stops within a file or two, since cancellation is checked between
+        units and inside the readers. Discovery is coarser -- a source's plan is
+        one walk of its corpus and is only interrupted between sources -- so a
+        pause during the first seconds of a cold start can take a walk to land.
+
+        Pausing is for getting the machine's disk and CPU back: a cold scan of a
+        large corpus reads for minutes, so waiting for the pass to end is not an
+        answer. The in-flight pass is therefore cancelled the same way shutdown
+        cancels it -- whatever has been ingested is already committed and its
+        cursors are stored, so resuming picks up mid-file rather than starting
+        the corpus again.
+
+        The flag is set here, on the request thread, so ``/api/state`` reports
+        the new state immediately instead of after the worker notices.
+        """
+        with self._pause_lock:
+            if paused == self._paused.is_set():
+                return paused
+            if paused:
+                self._paused.set()
+            else:
+                self._paused.clear()
+            self.scanner.progress.paused = paused
+            # Either way the worker should look again now: to leave the pass, or
+            # to start one.
+            self._wake.set()
+            self._broadcast_scan(self.scanner.progress, force=True)
+        return paused
+
+    def _should_interrupt(self) -> bool:
+        """Reasons for the scanner to abandon the pass it is part-way through."""
+        return self._stop.is_set() or self._paused.is_set()
+
     def refresh_now(self) -> None:
         """Recompute the derived state immediately, off the worker thread.
 
@@ -156,23 +203,45 @@ class Engine:
                 self._start_watcher()
             except Exception:
                 log.exception("watch setup failed; falling back to the scan heartbeat")
-        try:
-            self._pass(initial=True)
-        except Exception:
-            log.exception("initial scan failed")
+        initial = True
         while not self._stop.is_set():
+            if self._paused.is_set():
+                # Nothing is scanned and nothing is watched-for while paused; a
+                # change that arrives now is found by the pass that resuming
+                # runs, because every pass plans from the stored cursors rather
+                # than from the events it was woken by. The timeout is only
+                # there so a resume that raced the clear below is not missed.
+                self._enter_paused()
+                self._wake.wait(timeout=1.0)
+                self._wake.clear()
+                continue
+            try:
+                # A pass cut short by a pause has not finished the cold corpus,
+                # so the one that resumes it is still the initial scan.
+                if self._pass(initial=initial):
+                    initial = False
+            except Exception:
+                log.exception("%s scan failed", "initial" if initial else "incremental")
+                initial = False
+            if self._stop.is_set():
+                break
             # The timeout doubles as a heartbeat, so a missed inotify event
             # delays an update rather than losing it.
             self._wake.wait(timeout=self.settings.poll_seconds)
-            if self._stop.is_set():
-                break
             self._wake.clear()
-            try:
-                self._pass()
-            except Exception:
-                log.exception("incremental scan failed")
 
-    def _pass(self, *, initial: bool = False) -> None:
+    def _enter_paused(self) -> None:
+        """Say so once, rather than every time round the paused wait."""
+        progress = self.scanner.progress
+        if progress.phase == "paused":
+            return
+        progress.phase = "paused"
+        progress.current_file = None
+        progress.current_source = None
+        self._broadcast_scan(progress, force=True)
+
+    def _pass(self, *, initial: bool = False) -> bool:
+        """One scan pass. False if it was cut short by a stop or a pause."""
         if self.pricing.maybe_reload():
             self._refresh_derived(force=True)
 
@@ -196,16 +265,25 @@ class Engine:
         progress = self.scanner.scan_once(
             on_progress=on_progress,
             phase="scanning" if initial else "updating",
-            should_stop=self._stop.is_set,
+            should_stop=self._should_interrupt,
         )
         if self._stop.is_set():
             # Rolling up on the way out would undo the point of the early
             # return above: the rows are committed and the next start rebuilds
             # from them, so there is nothing here worth delaying shutdown for.
-            return
+            return False
         self._refresh_derived(force=changed["any"] or initial)
         self._broadcast_scan(progress, force=True)
         self._broadcast_data(force=True)
+        # Taken from the pass itself rather than re-read from the pause flag:
+        # a pause that arrives while the rollup above is running did not cut
+        # this pass short, and a pause that was lifted again before it returned
+        # did.
+        if progress.interrupted:
+            return False
+        # The corpus has been read through, so a rebuild that was owed is done.
+        progress.rebuild_pending = False
+        return True
 
     def _refresh_derived(self, force: bool = False) -> None:
         rebuilt = A.ensure_buckets_current(self.store, self.pricing)
@@ -347,6 +425,11 @@ class Engine:
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
+        # Until a pass finishes, the dashboard is showing an empty corpus rather
+        # than an empty history. Pausing part-way through is allowed -- it is the
+        # one control that gives the machine back -- so the state has to be
+        # visible instead of forbidden.
+        self.scanner.progress.rebuild_pending = True
         self.request_scan()
 
 

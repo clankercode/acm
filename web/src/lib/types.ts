@@ -45,7 +45,13 @@ export interface SourceScan {
 }
 
 export interface ScanState {
-  phase: 'idle' | 'discovering' | 'scanning' | 'updating' | 'tailing'
+  phase: 'idle' | 'discovering' | 'scanning' | 'updating' | 'tailing' | 'paused'
+  /** The operator has stopped the scan loop. Leads `phase`, which keeps
+   *  reporting the pass being cancelled until the worker has left it. */
+  paused: boolean
+  /** The local corpus was dropped for a rebuild that has not finished, so low
+   *  totals mean "not read back yet" rather than "you have no history". */
+  rebuild_pending: boolean
   files_total: number
   files_done: number
   files_changed: number
@@ -241,6 +247,15 @@ export interface AppState {
   sessions_dir: string
   sources: SourceInfo[]
   server_time: number
+  /** Optional because a cached bundle can outlive the server that served it: in
+   *  development a new build is often pointed at an older `ccm serve`. */
+  build?: BuildInfo
+}
+
+/** Which code the server is running, so a stale tab can notice an upgrade. */
+export interface BuildInfo {
+  version: string
+  id: string
 }
 
 export type Nums = (number | null)[]

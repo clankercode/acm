@@ -98,8 +98,17 @@ export const api = {
     return res.json()
   },
 
+  /** Throws while scanning is paused (409), so callers must say what they do then. */
   async rescan(full: boolean): Promise<void> {
-    await fetch(`/api/rescan?full=${full}`, { method: 'POST' })
+    const res = await fetch(`/api/rescan?full=${full}`, { method: 'POST' })
+    if (!res.ok) throw new Error(await res.text())
+  },
+
+  /** Stop or restart the scan loop. The in-flight pass is cancelled, not awaited. */
+  async setPaused(paused: boolean): Promise<boolean> {
+    const res = await fetch(`/api/scan/${paused ? 'pause' : 'resume'}`, { method: 'POST' })
+    if (!res.ok) throw new Error(await res.text())
+    return ((await res.json()) as { paused: boolean }).paused
   },
 
   // -- reference prices ---------------------------------------------------

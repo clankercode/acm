@@ -26,12 +26,34 @@ export function useLiveState() {
   const [scan, setScan] = useState<ScanState | null>(null)
   const [connected, setConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The id of a server build that is not the one this page loaded from, or null
+  // while they still agree. Carries the id rather than a flag so that a second
+  // upgrade is distinguishable from the first: a prompt the user dismissed has
+  // to come back when the server moves on again.
+  const [newBuild, setNewBuild] = useState<string | null>(null)
+  const build = useRef<string | null>(null)
 
   useEffect(() => {
     let source: EventSource | null = null
     let retry: number | undefined
     let closed = false
     let backoff = 1000
+
+    /**
+     * Take a full snapshot, from the first fetch or from a stream (re)connect.
+     *
+     * The build id is compared rather than stored per connect: `just update`
+     * replaces the wheel and restarts the unit, so a tab that reconnects to a
+     * newer server is holding asset URLs that server no longer has. The stream
+     * dropping is the cue to look, and the id is what confirms it.
+     */
+    const adopt = (payload: AppState) => {
+      const id = payload.build?.id ?? null
+      if (build.current === null) build.current = id
+      else if (id !== null && id !== build.current) setNewBuild(id)
+      setState(payload)
+      setScan(payload.scan)
+    }
 
     const connect = () => {
       if (closed) return
@@ -44,9 +66,7 @@ export function useLiveState() {
       })
 
       source.addEventListener('hello', (e) => {
-        const payload = JSON.parse((e as MessageEvent).data) as AppState
-        setState(payload)
-        setScan(payload.scan)
+        adopt(JSON.parse((e as MessageEvent).data) as AppState)
       })
 
       source.addEventListener('scan', (e) => {
@@ -76,8 +96,7 @@ export function useLiveState() {
     api
       .state()
       .then((s) => {
-        setState(s)
-        setScan(s.scan)
+        adopt(s)
         if (liveDisabled()) setConnected(true)
       })
       .catch((e: Error) => setError(e.message))
@@ -90,7 +109,7 @@ export function useLiveState() {
     }
   }, [])
 
-  return { state, scan, connected, error }
+  return { state, scan, connected, error, newBuild }
 }
 
 /**

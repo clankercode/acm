@@ -123,7 +123,21 @@ class SourceProgress:
 class ScanProgress:
     """Live view of what the scanner is doing, streamed to the browser."""
 
-    phase: str = "idle"  # idle | discovering | scanning | tailing
+    phase: str = "idle"  # idle | discovering | scanning | updating | tailing | paused
+    #: Set while the operator has stopped the scan loop. Distinct from the phase
+    #: because pausing cancels the pass rather than waiting for it: for the
+    #: moment between the request and the worker noticing, the phase still
+    #: honestly reads "scanning" while this already reads paused.
+    paused: bool = False
+    #: Set while the local corpus has been dropped for a rebuild that has not
+    #: finished. Pausing part-way through one leaves the dashboard legitimately
+    #: near-empty, which is worth saying out loud rather than letting it read as
+    #: "you have no history".
+    rebuild_pending: bool = False
+    #: Whether the last pass gave up part-way (stop or pause) rather than
+    #: finishing its plan. Read by the engine, which must not treat an abandoned
+    #: cold scan as a corpus that has been read.
+    interrupted: bool = False
     files_total: int = 0
     files_done: int = 0
     files_changed: int = 0
@@ -264,6 +278,8 @@ class ScanProgress:
             ]
         return {
             "phase": self.phase,
+            "paused": self.paused,
+            "rebuild_pending": self.rebuild_pending,
             "files_total": self.files_total,
             "files_done": self.files_done,
             "files_changed": self.files_changed,
@@ -345,6 +361,7 @@ class Scanner:
         """
         p = self.progress
         p.phase = "discovering"
+        p.interrupted = False
         p.started_at = time.time()
         p.finished_at = None
         p.files_total = 0
@@ -381,6 +398,7 @@ class Scanner:
         plans: list[tuple[Source, list]] = []
         for source in self.sources:
             if should_stop is not None and should_stop():
+                p.interrupted = True
                 p.phase = "tailing"
                 p.finished_at = time.time()
                 return p
@@ -418,6 +436,7 @@ class Scanner:
             p.current_source = source.name
             for unit in units:
                 if should_stop is not None and should_stop():
+                    p.interrupted = True
                     p.current_file = None
                     p.current_source = None
                     p.phase = "tailing"

@@ -409,6 +409,22 @@ a few appended lines happens every couple of seconds forever. What it does draw
 goes in the gap between the title and the controls, so a scan starting or ending
 never moves anything that was already on screen.
 
+**Pause** in the header stops the scan loop, and does it by cancelling the pass
+in flight rather than waiting for it — a cold scan of a large corpus reads for
+minutes at full disk, and the answer to wanting the machine back has to be better
+than killing the server. Nothing is lost: rows are committed as they are read and
+each file keeps a stored cursor, so **Resume** carries on mid-file. Refresh is
+refused while paused, since a full rescan drops the derived tables and there
+would be no worker to refill them.
+
+Every snapshot names the build that served it — the package version, the built
+`index.html` and the mtimes of the installed Python sources, hashed. A tab is
+open for days, and `just update` replaces the wheel and restarts the unit
+underneath it, leaving the browser holding asset URLs the new server no longer
+has. The stream dropping is the cue to look; the id on the reconnect's `hello` is
+what confirms it, and the tab then offers a reload rather than taking one. A
+plain restart on unchanged code is deliberately not an update.
+
 If inotify is unavailable — the per-user instance limit is easy to hit, and each
 client needs its own watcher — the watcher logs it once and falls back to
 polling. A slow poll runs regardless, because watches only cover directories
@@ -417,7 +433,7 @@ that existed at start-up and each new day creates one.
 ## Tests
 
 ```
-just test                     # 154 unit and integration tests, ~5s
+just test                     # 173 unit and integration tests, ~9s
 just test-corpus              # 28 tests against the real corpora, ~44s
 just check                    # what CI runs: tests, tsc, and a wheel that must serve
 ```

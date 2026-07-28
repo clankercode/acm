@@ -47,8 +47,20 @@ export function TopBar(props: Props) {
   // pass picking up a few appended lines runs every couple of seconds forever;
   // reporting those is what made the header strobe. Real catch-up work -- a
   // first scan, or the machine having been off -- is many files or many bytes.
+  // Optimistic, because the round trip plus the next broadcast is long enough
+  // for a click to feel ignored. Dropped as soon as the server agrees -- or as
+  // soon as the request fails -- rather than lying. With `?live=0` no broadcast
+  // ever arrives, so there it stands until the page is reloaded; that mode
+  // exists for screenshots, which have nothing to reconcile with.
+  const [pauseWish, setPauseWish] = useState<boolean | null>(null)
+  const paused = pauseWish ?? !!scan?.paused
+  useEffect(() => {
+    if (pauseWish != null && scan?.paused === pauseWish) setPauseWish(null)
+  }, [pauseWish, scan?.paused])
+
   const substantial =
     !!scan &&
+    !paused &&
     scan.phase !== 'idle' &&
     scan.phase !== 'tailing' &&
     (scan.files_total >= 10 ||
@@ -95,16 +107,23 @@ export function TopBar(props: Props) {
         </div>
 
         <span className="status" title={scan?.current_file ?? undefined}>
-          <span className={'dot ' + (!connected ? 'down' : busy ? 'busy' : 'live')} />
+          <span
+            className={
+              'dot ' +
+              (!connected ? 'down' : paused ? 'paused' : busy ? 'busy' : 'live')
+            }
+          />
           {/* One word, in a fixed footprint. The counts belong beside the bar,
               where they can grow a digit without shunting the row along. */}
           {!connected
             ? 'disconnected'
-            : !busy
-              ? 'live'
-              : scan!.phase === 'discovering'
-                ? 'discovering'
-                : verb.current}
+            : paused
+              ? 'paused'
+              : !busy
+                ? 'live'
+                : scan!.phase === 'discovering'
+                  ? 'discovering'
+                  : verb.current}
         </span>
 
         {/* Corpus totals, not the last pass's counters, and shown whether or not
@@ -173,7 +192,13 @@ export function TopBar(props: Props) {
               )}
             </>
           ) : (
-            pending && (
+            paused && scan?.rebuild_pending ? (
+              // Pausing part-way through a from-scratch rebuild leaves the
+              // charts honestly near-empty. Saying so beats letting it read as
+              // a machine with no history.
+              <span className="scan-meta">rebuild incomplete · resume to finish</span>
+            ) : (
+              pending && (
               <div
                 className="scanbar indeterminate"
                 role="progressbar"
@@ -181,6 +206,7 @@ export function TopBar(props: Props) {
               >
                 <div className="scanbar-fill" />
               </div>
+              )
             )
           )}
         </div>
@@ -199,14 +225,47 @@ export function TopBar(props: Props) {
           ))}
         </div>
 
+        {/* Pause is a resource control, not a view control: a cold scan reads
+            for minutes at full disk, and the answer to wanting the machine back
+            has to be better than killing the server. Resuming carries on from
+            the stored cursors, so nothing is re-read. */}
+        {/* No aria-pressed: the label is the state. "Resume, pressed" reads as
+            "resume is on", which is the opposite of what is true. */}
+        <button
+          className={'btn' + (paused ? ' primary' : '')}
+          type="button"
+          onClick={() => {
+            const next = !paused
+            setPauseWish(next)
+            api.setPaused(next).catch(() => setPauseWish(null))
+            if (!next) setPending(true)
+          }}
+          title={
+            paused
+              ? 'Resume scanning, carrying on where the paused pass stopped'
+              : 'Stop scanning until resumed. Reading stops within a file or two'
+          }
+        >
+          {paused ? 'Resume' : 'Pause'}
+        </button>
+
+        {/* aria-disabled rather than disabled: a disabled button leaves the tab
+            order and fires no mouse events, so the one place that says why it
+            cannot be used -- its own tooltip -- becomes unreachable. */}
         <button
           className="btn"
           type="button"
+          aria-disabled={paused}
           onClick={() => {
+            if (paused) return
             setPending(true)
-            api.rescan(false)
+            api.rescan(false).catch(() => {})
           }}
-          title="Check the corpus for new sessions now"
+          title={
+            paused
+              ? 'Scanning is paused — resume first'
+              : 'Check the corpus for new sessions now'
+          }
         >
           Refresh
         </button>
