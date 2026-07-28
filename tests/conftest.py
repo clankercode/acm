@@ -48,7 +48,9 @@ class Thread:
     def advance(self, seconds: float = 1.0) -> None:
         self.clock += timedelta(seconds=seconds)
 
-    def meta(self) -> Thread:
+    def meta(self, source: object = None) -> Thread:
+        """``source`` overrides the spawn-metadata block, whose shape varies by
+        Codex version -- tests pass odd ones deliberately."""
         self._emit(
             {
                 "timestamp": iso(self.clock),
@@ -64,7 +66,7 @@ class Thread:
                     "thread_source": self.thread_source,
                     "agent_role": None,
                     "agent_nickname": None,
-                    "source": {},
+                    "source": {} if source is None else source,
                     "git": {"repository_url": self.git_repo, "branch": "main"},
                 },
             }
@@ -130,6 +132,13 @@ class Thread:
                 },
             }
         )
+        return self
+
+    def compact(self) -> Thread:
+        """A compaction: the context is rebuilt and Codex's cumulative token
+        counters start again from zero, mid-file."""
+        self.event("context_compacted")
+        self.cum = [0, 0, 0, 0]
         return self
 
     def event(self, kind: str = "context_compacted") -> Thread:
@@ -669,3 +678,33 @@ def clock() -> datetime:
     # arithmetic in assertions agree; a naive value would be read as UTC on the
     # way in and as local time on the way out.
     return datetime(2026, 7, 1, 12, 0, 0, tzinfo=UTC)
+
+
+#: Models the corpus contains that the rate table deliberately does not price,
+#: each with the reason it cannot be. The corpus tests assert that the unpriced
+#: set is *exactly* this -- an empty set was never achievable, and asserting one
+#: only meant two permanently red tests, while entering a rate of 0 would value
+#: real traffic at nothing and look deliberate. Keeping the list explicit means
+#: a genuinely new unpriced model still fails, loudly, with a name attached.
+#:
+#: Compared on the base name, so a routed `prefix/model` is covered too.
+UNPRICED_BY_DESIGN = {
+    # Announced but unpublished rates. The largest gap by far -- 2.6e9 input
+    # tokens -- so it is the first one worth closing when xAI/OpenAI publish.
+    "gpt-5.3-codex-spark",
+    # Not a public SKU: an internal alias for whatever model the review pass
+    # ran on, so there is no rate that belongs to this name.
+    "codex-auto-review",
+    # Plan-only models with no metered equivalent to value the traffic at.
+    "mimo-v2-pro",
+    # Shut down before a public rate existed.
+    "gemini-3-pro-preview",
+    # Not a model: the scanner could not determine one. Priced at nothing
+    # because there are no tokens attached to it.
+    "unknown",
+}
+
+
+def unpriced_names(quality: dict) -> set[str]:
+    """Base names of the models `data_quality` found no rate for."""
+    return {row["model"].rsplit("/", 1)[-1] for row in quality["unpriced_models"]}

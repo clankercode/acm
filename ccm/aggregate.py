@@ -1128,6 +1128,13 @@ def client_cost_audit(store: Store, pricing: PricingTable) -> dict[str, dict]:
     Restricted to rows the client actually put a non-zero price on. Pi records
     a flat zero for anything reached through a subscription proxy, and folding
     those in would make a perfect match look like a 33% overcharge.
+
+    Reported twice: over everything priced, and over standard-tier requests
+    only. The clients do not model long-context surcharges -- Pi bills a
+    200k-token prompt at the same rate as a short one -- so on a corpus where
+    half the prompts cross a threshold the headline ratio measures that
+    disagreement and nothing else. The standard-tier figure is the one where a
+    mismatch means *we* are wrong.
     """
     rows = store.query(
         "SELECT source, model, input_tokens, cached_tokens, cache_write_tokens,"
@@ -1137,23 +1144,38 @@ def client_cost_audit(store: Store, pricing: PricingTable) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for row in rows:
         entry = out.setdefault(
-            row["source"], {"requests": 0, "ours": 0.0, "theirs": 0.0}
+            row["source"],
+            {
+                "requests": 0,
+                "ours": 0.0,
+                "theirs": 0.0,
+                "standard_requests": 0,
+                "standard_ours": 0.0,
+                "standard_theirs": 0.0,
+            },
         )
         rate = pricing.get(row["model"])
         if rate is None:
             continue
-        entry["requests"] += 1
-        entry["theirs"] += row["client_cost"]
-        entry["ours"] += compute_tier(
-            rate.tier_for(row["input_tokens"]),
+        tier = rate.tier_for(row["input_tokens"])
+        cost = compute_tier(
+            tier,
             row["input_tokens"],
             row["cached_tokens"],
             row["output_tokens"],
             row["cache_write_tokens"],
             row["cache_write_1h_tokens"],
         ).cost
+        entry["requests"] += 1
+        entry["theirs"] += row["client_cost"]
+        entry["ours"] += cost
+        if tier is rate.tier_for(0):
+            entry["standard_requests"] += 1
+            entry["standard_theirs"] += row["client_cost"]
+            entry["standard_ours"] += cost
     for entry in out.values():
-        entry["ours"] = round(entry["ours"], 6)
-        entry["theirs"] = round(entry["theirs"], 6)
-        entry["ratio"] = (entry["ours"] / entry["theirs"]) if entry["theirs"] else None
+        for prefix in ("", "standard_"):
+            ours = entry[f"{prefix}ours"] = round(entry[f"{prefix}ours"], 6)
+            theirs = entry[f"{prefix}theirs"] = round(entry[f"{prefix}theirs"], 6)
+            entry[f"{prefix}ratio"] = (ours / theirs) if theirs else None
     return out

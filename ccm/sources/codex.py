@@ -65,8 +65,37 @@ def iter_rollouts(root: Path) -> Iterator[Path]:
     yield from walk_jsonl(root, match=lambda name: name.startswith("rollout-"))
 
 
-def dedup_key(session_id: str, cum: tuple[int, int, int, int]) -> str:
-    return "|".join((session_id, *(str(c) for c in cum)))
+def _dig(obj: object, *keys: str) -> dict:
+    """Follow a path of dict keys, giving up at the first non-dict.
+
+    Rollout metadata is only loosely specified and its shapes change between
+    Codex versions -- a key that held an object in one release holds a string
+    in the next. Returning an empty dict rather than raising keeps a schema
+    surprise in the descriptive fields from costing us a file's token counts.
+    """
+    for key in keys:
+        if not isinstance(obj, dict):
+            return {}
+        obj = obj.get(key)
+    return obj if isinstance(obj, dict) else {}
+
+
+def dedup_key(
+    session_id: str,
+    cum: tuple[int, int, int, int],
+    last: tuple[int, int, int, int] = (0, 0, 0, 0),
+) -> str:
+    """Identify a request by its running totals *and* its own usage.
+
+    The cumulative tuple alone is what a replayed history repeats verbatim, so
+    it is what collapses a resume -- but it is not unique within a session. A
+    compaction restarts the counters, and the rebuilt run walks back up through
+    totals the session already reached; those requests keyed identically to
+    their pre-compaction namesakes and were discarded as replays. Their own
+    per-request numbers are what tell them apart, and a replay repeats those
+    unchanged too, so adding them costs the dedup nothing.
+    """
+    return "|".join((session_id, *(str(c) for c in cum), *(str(c) for c in last)))
 
 
 class RolloutParser:
@@ -107,10 +136,18 @@ class RolloutParser:
         self.last_cum: tuple[int, int, int, int] = tuple(  # type: ignore[assignment]
             carry.get("last_cum") or (0, 0, 0, 0)
         )
+        #: The dedup key of that request, which events anchor to. Carried rather
+        #: than recomputed: it now depends on per-request numbers that are not
+        #: recoverable from the cumulative tuple alone.
+        self.last_dk: str | None = carry.get("last_dk")
         #: Count of each event kind seen since that request.
         self.ordinals: dict[str, int] = dict(carry.get("ordinals") or {})
-        #: Highest cumulative total seen, to detect counter regressions.
-        self.max_cum_total: int = int(carry.get("max_cum_total") or 0)
+        #: Cumulative total of the previous event, to detect counter resets.
+        #: Deliberately the previous value and not a high-water mark: see
+        #: `_read_token_count`.
+        self.prev_cum_total: int = int(
+            carry.get("prev_cum_total") or carry.get("max_cum_total") or 0
+        )
         self.first_ts: int | None = cursor.get("first_ts")
         self.last_ts: int | None = cursor.get("last_ts")
         self.have_meta: bool = bool(cursor.get("rollout_id"))
@@ -118,8 +155,9 @@ class RolloutParser:
     def carry_state(self) -> dict:
         return {
             "last_cum": list(self.last_cum),
+            "last_dk": self.last_dk,
             "ordinals": self.ordinals,
-            "max_cum_total": self.max_cum_total,
+            "prev_cum_total": self.prev_cum_total,
         }
 
     # -- line handling -----------------------------------------------------
@@ -173,6 +211,11 @@ class RolloutParser:
             self._read_event(ptype, ts, result)
 
     def _read_meta(self, payload: dict) -> None:
+        # Every field here is descriptive -- none of it affects token
+        # accounting -- so an unrecognised shape must never raise. It used to:
+        # `source.subagent` became a bare role string ("review") in a later
+        # Codex, `.get` on it threw, and the exception aborted ingest at this
+        # file's *first* line, silently dropping the whole rollout's usage.
         self.session_id = payload.get("session_id")
         self.rollout_id = payload.get("id")
         self.parent_thread_id = payload.get("parent_thread_id")
@@ -182,18 +225,10 @@ class RolloutParser:
         self.cwd = payload.get("cwd")
         self.originator = payload.get("originator")
         self.cli_version = payload.get("cli_version")
-        git = payload.get("git") or {}
-        if isinstance(git, dict):
-            self.git_repo = git.get("repository_url")
-            self.git_branch = git.get("branch")
-        source = payload.get("source") or {}
-        spawn = (
-            ((source.get("subagent") or {}).get("thread_spawn") or {})
-            if isinstance(source, dict)
-            else {}
-        )
-        if isinstance(spawn, dict):
-            self.depth = spawn.get("depth")
+        git = _dig(payload, "git")
+        self.git_repo = git.get("repository_url")
+        self.git_branch = git.get("branch")
+        self.depth = _dig(payload, "source", "subagent", "thread_spawn").get("depth")
 
     def _read_token_count(self, payload: dict, ts: int | None, result: ParseOutput) -> None:
         info = payload.get("info") or {}
@@ -210,10 +245,16 @@ class RolloutParser:
             int(total.get("output_tokens") or 0),
             int(total.get("reasoning_output_tokens") or 0),
         )
+        # One flag per *step down*, not per event below a high-water mark. A
+        # compaction resets Codex's cumulative counters mid-session, and against
+        # a running maximum that single reset flagged every one of the thousands
+        # of events after it: one real reset in a long rollout was reported as
+        # 9537 anomalies, making this the second-largest kind on the dashboard
+        # and burying the counts that mean something.
         cum_total = int(total.get("total_tokens") or 0)
-        if cum_total < self.max_cum_total:
+        if cum_total < self.prev_cum_total:
             result.flag("cum_regression")
-        self.max_cum_total = max(self.max_cum_total, cum_total)
+        self.prev_cum_total = cum_total
 
         inp = int(last.get("input_tokens") or 0)
         cached = int(last.get("cached_input_tokens") or 0)
@@ -235,7 +276,7 @@ class RolloutParser:
         result.requests.append(
             request_row(
                 self.source,
-                dedup_key(session_id, cum),
+                self._remember_key(dedup_key(session_id, cum, (inp, cached, out, reason))),
                 ts=ts,
                 session_id=session_id,
                 cum=cum,
@@ -261,6 +302,11 @@ class RolloutParser:
         self.last_cum = cum
         self.ordinals = {}
 
+    def _remember_key(self, dk: str) -> str:
+        """Record the key events after this request will anchor to."""
+        self.last_dk = dk
+        return dk
+
     def _read_event(self, kind: str, ts: int | None, result: ParseOutput) -> None:
         if ts is None:
             return
@@ -272,7 +318,7 @@ class RolloutParser:
         result.events.append(
             (
                 self.source,
-                dedup_key(self.session_id or "", self.last_cum),
+                self.last_dk or dedup_key(self.session_id or "", self.last_cum),
                 kind,
                 ordinal,
                 ts,

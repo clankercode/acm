@@ -205,14 +205,21 @@ class GrokParser:
     def _emit(
         self, anchor: str, name: str | None, usage: dict, ts: int, out: ParseOutput
     ) -> None:
-        out.raw_events += 1
-
         prompt = int(usage.get("inputTokens") or 0)
         cached = int(usage.get("cachedReadTokens") or 0)
         output = int(usage.get("outputTokens") or 0)
         reasoning = int(usage.get("reasoningTokens") or 0)
         total = int(usage.get("totalTokens") or 0)
         calls = int(usage.get("modelCalls") or 1)
+
+        # A turn that reported no usage at all is not a request. It reaches here
+        # through the no-modelUsage fallback, where the outer block sometimes
+        # carries no token fields either; recorded, it became a phantom request
+        # with zero tokens, counted in requests-per-day and costing nothing.
+        if not (prompt or cached or output or reasoning or total):
+            return
+
+        out.raw_events += 1
 
         if cached > prompt:
             out.flag("cached_gt_input")

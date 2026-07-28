@@ -29,9 +29,11 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-#: Bumped whenever the shape below changes. Because everything here is derived,
-#: a mismatch is resolved by dropping and rebuilding rather than by migrating.
-SCHEMA_VERSION = "3"
+#: Bumped whenever the shape below changes -- or when the meaning of a value in
+#: it does, as in 4, where the Codex dedup key gained the per-request usage.
+#: Because everything here is derived, a mismatch is resolved by dropping and
+#: rebuilding rather than by migrating.
+SCHEMA_VERSION = "4"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (

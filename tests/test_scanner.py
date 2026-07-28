@@ -7,6 +7,8 @@ import time
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
+
 from ccm.scanner import (
     MAX_ERROR_KINDS,
     ROW_RATE_WINDOW,
@@ -250,6 +252,32 @@ def test_anomalies_are_counted_not_corrected(store, sessions_dir, clock):
     assert (row["output_tokens"], row["reasoning_tokens"]) == (5, 40)
 
 
+def test_a_counter_reset_is_one_anomaly_not_one_per_later_request(
+    store, sessions_dir, clock
+):
+    """Flag the step down, not everything downstream of it.
+
+    Measured against a high-water mark instead, a single compaction in a long
+    session flagged every request that followed it -- 9537 anomalies from one
+    reset in the real corpus, which drowned out every other kind.
+    """
+    t = Thread(session_id="s", rollout_id="c1", clock=clock)
+    t.meta().turn_context()
+    for _ in range(4):
+        t.request(1000, 0, 50)
+    t.compact()
+    for _ in range(20):
+        t.request(100, 0, 5)
+    t.write(sessions_dir)
+
+    scan(store, sessions_dir)
+    counts = {r["kind"]: r["count"] for r in store.query("SELECT * FROM anomalies")}
+    assert counts.get("cum_regression") == 1
+    # And nothing was dropped: the post-reset requests are lower-numbered than
+    # the pre-reset ones, which must not read as a replay.
+    assert store.one("SELECT COUNT(*) AS n FROM requests")["n"] == 24
+
+
 def test_session_dimensions_are_captured(store, sessions_dir, clock):
     t = Thread(
         session_id="s", rollout_id="d1", clock=clock,
@@ -263,6 +291,38 @@ def test_session_dimensions_are_captured(store, sessions_dir, clock):
     assert row["cwd"] == "/srv/app"
     assert row["git_repo"] == "/srv/app.git"
     assert row["is_subagent"] == 1
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        {"subagent": "review"},  # the shape a later Codex actually writes
+        {"subagent": {"thread_spawn": None}},
+        {"subagent": None},
+        "user",
+        [],
+        None,
+    ],
+    ids=["role-string", "null-spawn", "null-subagent", "string", "list", "empty"],
+)
+def test_odd_spawn_metadata_never_costs_a_file_its_requests(
+    store, sessions_dir, clock, source
+):
+    """A metadata shape we do not recognise must not discard token counts.
+
+    `source.subagent` held an object, then a bare role string; indexing into
+    the string raised, and because session_meta is a rollout's *first* line the
+    exception dropped the entire file. Thirteen real rollouts went uncounted
+    with nothing but an error tally to show for it.
+    """
+    t = Thread(session_id="s", rollout_id="odd", clock=clock)
+    t.meta(source=source).turn_context()
+    t.request(100, 0, 5)
+    t.write(sessions_dir)
+
+    progress = Scanner(store, sessions_dir.parents[2]).scan_once()
+    assert progress.errors == 0, progress.last_error
+    assert store.one("SELECT COUNT(*) AS n FROM requests")["n"] == 1
 
 
 def test_rescanning_an_unchanged_corpus_is_a_no_op(store, sessions_dir, clock):
