@@ -783,7 +783,16 @@ input.inline-name:hover { border-color: var(--border); }
 /* A long table scrolls in its own box rather than growing the page, so the
    panels below it stay reachable. `max-height` is set inline from a measured row
    height, which is the only way the clip lands on a row boundary. */
-.table-scroll.clipped { overflow-y: auto; overscroll-behavior: contain; }
+/* Vertical overscroll chains to the page on purpose: a table caught mid-page is
+   something to scroll past, not to get stuck in, so reaching its last row hands
+   the wheel back and the page carries on down (and likewise up, from its first
+   row). Sideways stays contained -- a horizontal fling that escaped the table
+   would be a browser back gesture. */
+.table-scroll.clipped {
+  overflow-y: auto;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
+}
 
 /* The total is the row most worth keeping in view while scrolling the rest. */
 .table-scroll.clipped tfoot td {
