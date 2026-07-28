@@ -877,6 +877,37 @@ table.data td.dim { color: var(--text-muted); }
   letter-spacing: 0;
 }
 
+/* The output group: narrower and quieter than the input columns it follows, so
+   a wide table still leads with the numbers that answer "is caching working".
+   The rule marks where one quantity stops and the other starts -- output is
+   never cached and is billed several times as dearly, so the two runs of
+   per-million figures must not read as one. */
+table.data th.out,
+table.data td.out {
+  padding-inline: var(--space-1);
+  font-size: .92em;
+}
+
+table.data td.out { color: var(--text-muted); }
+
+table.data th.group-start,
+table.data td.group-start {
+  border-inline-start: var(--rule) solid var(--border-strong);
+}
+
+/* Spans its group, so it is a heading rather than a column label. */
+table.data tr.group-row th {
+  text-align: center;
+  padding-block-end: 0;
+  cursor: default;
+}
+
+table.data tr.group-row th:hover { color: var(--text-muted); }
+
+/* The cell spanning the input columns is structural padding, so it must not
+   draw the row rule every other body cell does. */
+table.data tr.group-row td { border: 0; padding: 0; }
+
 .bar-cell { position: relative; }
 .bar-cell .bar {
   position: absolute;

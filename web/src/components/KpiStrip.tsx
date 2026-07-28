@@ -5,6 +5,9 @@ interface Props {
   totals: Totals | null
   /** Same window, immediately before the current one, for the trend chips. */
   previous: Totals | null
+  /** Adds the generation tile. Off, output still gets a mention under input
+   *  tokens -- it is too central to the bill to be entirely absent. */
+  showOutput?: boolean
 }
 
 /**
@@ -15,11 +18,11 @@ interface Props {
  * million. It folds cache hit rate, context tier and model mix together, and
  * lower is always better regardless of how much work was done.
  */
-export function KpiStrip({ totals, previous }: Props) {
+export function KpiStrip({ totals, previous, showOutput }: Props) {
   if (!totals) {
     return (
       <div className="kpis">
-        {Array.from({ length: 6 }, (_, i) => (
+        {Array.from({ length: showOutput ? 7 : 6 }, (_, i) => (
           <div className="kpi" key={i}>
             <div className="kpi-label">&nbsp;</div>
             <div className="kpi-value">--</div>
@@ -98,9 +101,33 @@ export function KpiStrip({ totals, previous }: Props) {
       <Kpi
         label="Input tokens"
         value={compact(totals.input_tokens)}
-        sub={`${compact(totals.fresh_tokens)} fresh · ${compact(totals.output_tokens)} out`}
+        // The "out" half is dropped once the tile beside it says the same thing
+        // in more detail; without it, output is too central to the bill to be
+        // absent from the headline row entirely.
+        sub={
+          showOutput
+            ? `${compact(totals.fresh_tokens)} fresh`
+            : `${compact(totals.fresh_tokens)} fresh · ${compact(totals.output_tokens)} out`
+        }
         title="Prompt tokens processed, cached and fresh combined."
       />
+
+      {/* Volume next to price, because output volume alone is unreadable: a few
+          million tokens is either trivial or the largest line on the bill
+          depending entirely on which model wrote them. */}
+      {showOutput && (
+        <Kpi
+          label="Output tokens"
+          value={compact(totals.output_tokens)}
+          sub={
+            <>
+              {usd(totals.cost_output)} at {rate(totals.output_rate)}/M ·{' '}
+              {pct(totals.cost ? totals.cost_output / totals.cost : 0, 0)} of spend
+            </>
+          }
+          title="Tokens generated, reasoning included, and what they cost. Output is never cached and is billed several times the input rate."
+        />
+      )}
 
       <Kpi
         label="Avg context"

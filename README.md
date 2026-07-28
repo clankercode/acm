@@ -328,6 +328,24 @@ rate per token, not a line — and because it is the one part of the bill that
 shrinks by changing behaviour rather than by changing model. On this corpus it
 is **$5,470 of $18,966, or 28.8% of spend**.
 
+The other half of the bill is generation, and the **Output** switch in the header
+reveals it everywhere at once: a right-hand column group on every breakdown table
+(tokens, what they cost, and `$/M out`), two columns in the session list, an extra
+KPI, output volume and output spend charted by model, and an output metric on the
+calendar. One switch rather than one per surface, and remembered between visits,
+because it is a standing interest — and `?output=1` pins it for a screenshot or a
+shared link.
+
+It is a group and not three more columns in the run, because output is not
+comparable with prompt tokens: it is never cached, has no cache-write tier, is
+billed several times as dearly, and is a fraction of the volume. Consequently
+`$/M out` is close to the model's list output price by construction — it moves
+with model mix, not with anything you can improve — which is exactly why it is
+worth reading beside `$/Mtok` rather than in the same run of numbers as it. What
+does move is the share: on this corpus generation is a modest fraction of spend,
+and the "Where the money goes" chart is where the four bands are held against
+each other.
+
 Provider prefixes (`pooler/`, `llmp/`, `minimax/`) resolve to the underlying
 model's rates but are kept as a separate dimension, which is what makes
 routed-versus-direct comparable. Most clients record the prefix themselves.
@@ -418,7 +436,7 @@ refused while paused, since a full rescan drops the derived tables and there
 would be no worker to refill them.
 
 Every snapshot names the build that served it — the package version, the built
-`index.html` and the mtimes of the installed Python sources, hashed. A tab is
+`index.html` and the contents of the installed Python sources, hashed. A tab is
 open for days, and `just update` replaces the wheel and restarts the unit
 underneath it, leaving the browser holding asset URLs the new server no longer
 has. The stream dropping is the cue to look; the id on the reconnect's `hello` is
@@ -433,7 +451,7 @@ that existed at start-up and each new day creates one.
 ## Tests
 
 ```
-just test                     # 173 unit and integration tests, ~9s
+just test                     # 175 unit and integration tests, ~9s
 just test-corpus              # 28 tests against the real corpora, ~44s
 just check                    # what CI runs: tests, tsc, and a wheel that must serve
 ```
