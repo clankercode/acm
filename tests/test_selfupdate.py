@@ -7,6 +7,7 @@ starting an update would be a test that pulled and installed something.
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import replace
 
@@ -270,6 +271,63 @@ def test_two_clicks_cannot_start_two_updates(base, tmp_path):
     updater.marker_path.write_text(f"{time.time():.0f}\n")
     with pytest.raises(RuntimeError, match="already running"):
         updater.start()
+
+
+def test_a_stale_marker_does_not_let_two_updates_through(base, tmp_path, monkeypatch):
+    """The interleaving an exclusive-create lock could not stop.
+
+    A killed update leaves its marker behind, so a lock made of "the file exists"
+    also has to delete a stale one -- and that deletion is the hole: two threads
+    both see the stale marker, both unlink it, both create it, and both proceed.
+    Nobody loses that race, which is the opposite of what a lock is for.
+    """
+    import os
+
+    updater = Updater(replace(base, checkout_path=fake_checkout(tmp_path)))
+    updater.marker_path.parent.mkdir(parents=True, exist_ok=True)
+    updater.marker_path.write_text("killed\n")
+    ancient = time.time() - 3600
+    os.utime(updater.marker_path, (ancient, ancient))
+    assert updater.running() is False, "precondition: the marker is stale"
+
+    launched: list[list[str]] = []
+    monkeypatch.setattr(
+        "ccm.selfupdate.subprocess.Popen", lambda argv, **kw: launched.append(argv)
+    )
+
+    before = updater.marker_path.stat().st_ino
+    updater.start()
+    assert len(launched) == 1
+
+    # The marker is rewritten in place, never replaced. This is the whole fix, and
+    # it is asserted on the inode because that is what distinguishes the two
+    # implementations: an exclusive-create lock has to remove a stale marker before
+    # it can claim, and *that* removal is the hole -- two callers both past their
+    # staleness check both delete and both create, so both proceed. Racing threads
+    # will not reliably reproduce that interleaving (the critical section is a few
+    # syscalls long), so the invariant is tested instead of the timing.
+    assert updater.marker_path.stat().st_ino == before, "the marker was replaced"
+    assert updater.running() is True
+
+
+def test_a_header_that_is_not_an_authority_is_not_this_machine(base, tmp_path):
+    """`_host_only` decides who may deploy, so it may not be generous.
+
+    Splitting on the last "//" read "evil.example//localhost" as localhost. No
+    browser can send that -- Host and Origin come from a URL authority, which
+    cannot contain a slash -- but a parse that is wrong by construction becomes a
+    hole the moment it is reused.
+    """
+    from ccm.selfupdate import _host_only, _names_this_machine
+
+    assert _host_only("http://localhost:5188") == "localhost"
+    assert _host_only("127.0.0.1:8808") == "127.0.0.1"
+    assert _host_only("[::1]:8808") == "::1"
+    for hostile in ("evil.example//localhost", "localhost/../evil", "a@localhost", ""):
+        assert not _names_this_machine(_host_only(hostile)), hostile
+
+    updater = Updater(replace(base, checkout_path=fake_checkout(tmp_path)))
+    assert updater.host_header_problem({"host": "evil.example//localhost"})
 
 
 def test_a_slow_build_is_not_declared_dead(base, tmp_path):

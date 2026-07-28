@@ -21,6 +21,7 @@ cgroup, a detached child included.
 
 from __future__ import annotations
 
+import fcntl
 import ipaddress
 import logging
 import os
@@ -46,11 +47,20 @@ LOG_TAIL_BYTES = 16 * 1024
 
 
 def _host_only(value: str) -> str:
-    """The host out of a ``Host`` or ``Origin`` header: no scheme, no port."""
-    host = value.split("//")[-1]
+    """The host out of a ``Host`` or ``Origin`` header: no scheme, no port.
+
+    Returns "" for anything that is not a bare authority, which never names this
+    machine. Splitting on the last "//" instead would read
+    ``evil.example//localhost`` as localhost -- unreachable today, since a browser
+    derives both headers from a URL authority that cannot contain a slash, but
+    wrong by construction, and this function decides who may deploy.
+    """
+    host = value.split("://", 1)[-1]
+    if any(c in host for c in "/?#@ \t"):
+        return ""
     if host.startswith("["):  # [::1]:8808
         end = host.find("]")
-        return host[1:end] if end > 0 else host[1:]
+        return host[1:end] if end > 0 else ""
     return host.split(":")[0]
 
 
@@ -62,7 +72,11 @@ def _names_this_machine(host: str) -> bool:
     hostname that happens to resolve here -- is not this machine for our
     purposes; see :meth:`Updater.host_header_problem`.
     """
-    if host in ("localhost", ""):
+    # "" is what _host_only returns for anything it could not parse, and an
+    # unparseable authority is not this machine.
+    if not host:
+        return False
+    if host == "localhost":
         return True
     try:
         return ipaddress.ip_address(host).is_loopback
@@ -287,23 +301,39 @@ class Updater:
         assert script is not None
 
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        # The marker is the lock, claimed by creating it exclusively rather than
-        # by writing it: the endpoint is sync, so two clicks land on two
-        # threadpool threads and the check above can pass on both, leaving two
-        # `git pull`s and two `just install`s racing over one checkout. Removing
-        # a marker we have just judged dead is the only window left, and it costs
-        # nothing to lose that race.
-        if self.marker_path.exists():
-            self.marker_path.unlink(missing_ok=True)
+        # Claiming the attempt has to be atomic: the endpoint is sync, so two
+        # requests land on two threadpool threads and the check above can pass on
+        # both, leaving two `git pull`s and two `just install`s racing over one
+        # checkout.
+        #
+        # The lock is an advisory lock on the marker, not the marker's existence.
+        # Existence cannot work, because a killed update leaves the file behind:
+        # any scheme that treats the file as the lock also has to delete a stale
+        # one, and that deletion punches straight through the exclusive create --
+        # two threads both find the stale marker, both unlink, both create, and
+        # both proceed. Nobody loses that race, which is the opposite of a lock.
+        # Freshness is already the signal for whether an attempt is live (see
+        # `running`), so existence is free to mean nothing at all.
+        fd = os.open(self.marker_path, os.O_CREAT | os.O_WRONLY, 0o644)
         try:
-            fd = os.open(self.marker_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError as exc:
-            raise RuntimeError("An update is already running") from exc
-        with os.fdopen(fd, "w") as fh:
-            fh.write(f"{time.time():.0f}\n")
-        # Cleared after the claim: a stale "status=ok" beside a running attempt
-        # would read as an update that had already succeeded.
-        self.done_path.unlink(missing_ok=True)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                raise RuntimeError("An update is already running") from exc
+            # Re-checked under the lock: whoever held it a moment ago may have
+            # been claiming the very attempt this one is about to duplicate.
+            if self.running():
+                raise RuntimeError("An update is already running")
+            # Cleared before the timestamp is written, so the marker is always
+            # newer than the done file it replaces -- and a stale "status=ok"
+            # beside a running attempt cannot read as one that already succeeded.
+            self.done_path.unlink(missing_ok=True)
+            os.ftruncate(fd, 0)
+            os.write(fd, f"{time.time():.0f}\n".encode())
+        finally:
+            # Releases the lock. It only ever guarded the claim: the update
+            # outlives this process, so it cannot be what holds the lock.
+            os.close(fd)
         self.log_path.write_text("[starting] update requested\n")
 
         runner = shutil.which("systemd-run")

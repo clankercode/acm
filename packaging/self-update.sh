@@ -56,12 +56,22 @@ if ! systemctl --user is-active --quiet "$unit"; then
     # lie the panel repeats.
     say "installed, but $unit is not running -- the process serving this page is"
     say "still the old build. Restart however you started it."
+    say "done"
+    echo "status=partial" >"$log.done"
+    exit 0
 elif [ "$restart" = norestart ]; then
     # No systemd-run, so this script lives inside the service's own cgroup and
     # `systemctl restart` would kill it here -- no outcome written, the panel
     # stuck on "Updating..." forever, after a successful update.
     say "installed, but not restarting: without systemd-run this script would be"
     say "killed by the restart. Run: systemctl --user restart $unit"
+    say "done"
+    # Not "ok": the new code is on disk but the old code is still serving, and a
+    # panel reading "Last update" would be claiming otherwise. Nothing else here
+    # would correct it either -- the build id never changes, so no reload prompt
+    # fires.
+    echo "status=partial" >"$log.done"
+    exit 0
 else
     say "restarting $unit"
     # The server dies here; the browser reconnects on its own and notices the

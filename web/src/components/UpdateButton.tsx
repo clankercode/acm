@@ -160,9 +160,14 @@ export function UpdateButton() {
                       ? 'Update failed'
                       : status?.outcome === 'ok'
                         ? 'Last update'
-                        : // No outcome recorded: most likely the restart took the
-                          // script with it. The log is the only honest answer.
-                          'Update ended — see the log'}
+                        : status?.outcome === 'partial'
+                          ? // Installed, but this page is still being served by the
+                            // old build, and nothing else will say so: the build id
+                            // has not changed, so no reload prompt fires.
+                            'Installed — restart needed'
+                          : // No outcome recorded at all. The log is the only
+                            // honest answer.
+                            'Update ended — see the log'}
                 </span>
                 <button className="btn" type="button" onClick={() => setOpen(false)}>
                   Close
