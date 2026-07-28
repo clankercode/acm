@@ -49,6 +49,10 @@ _BUILDERS = {
     "pi": lambda s: PiSource(s.pi_dir),
     "opencode": lambda s: OpenCodeSource(s.opencode_db),
     "grok": lambda s: GrokSource(s.grok_dir),
+    "kimi_code": lambda s: KimiCodeSource(s.kimi_code_dir),
+    "kimi_cli": lambda s: KimiCliSource(s.kimi_dir),
+    "hermes": lambda s: HermesSource(s.hermes_db),
+    "copilot": lambda s: CopilotSource(s.copilot_db),
 }
 
 

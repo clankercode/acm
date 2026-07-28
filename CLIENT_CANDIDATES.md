@@ -2,7 +2,7 @@
 
 Inventory of coding agents we could scan for token / cache / cost stats.
 
-**Currently implemented** (see `ccm/sources/` and README): Codex, Claude Code, Pi, OpenCode, Grok.
+**Currently implemented** (see `ccm/sources/` and README): Codex, Claude Code, Pi, OpenCode, Grok, Kimi Code, Kimi CLI, Hermes, Copilot CLI.
 
 This file is about **what else exists on this machine (or should)**, split by whether we already have a local history corpus to reverse-engineer against.
 
@@ -31,11 +31,11 @@ These have install/state dirs on this host and look scannable (or almost). Rough
 
 ### Highest-ROI next sources (local)
 
-1. **Kimi Code** — dedicated `usage.record` events, large live corpus  
-2. **Hermes** — pre-aggregated usage tables with cache splits  
-3. **Copilot CLI** — `assistant_usage_events` table  
-4. **Kimi CLI** — same family as (1), different wire format  
-5. **Cursor** — only after confirming a token-bearing store (not just transcripts / AI-code %)  
+1. **Kimi Code** — ✅ implemented (`ccm/sources/kimi_code.py`)
+2. **Hermes** — ✅ implemented (`ccm/sources/hermes.py`)
+3. **Copilot CLI** — ✅ implemented (`ccm/sources/copilot.py`)
+4. **Kimi CLI** — ✅ implemented (`ccm/sources/kimi_cli.py`)
+5. **Cursor** — only after confirming a token-bearing store (not just transcripts / AI-code %). A 2026-07-28 spike confirmed `ai-code-tracking.db` has **no token columns**; the only remaining candidate is the opaque 516 MB Electron `state.vscdb` (LevelDB blob), which needs deep reverse-engineering with uncertain payoff.
 6. **Claude Desktop / Cowork** — first check whether Cowork sessions already appear under Claude Code projects via `cliSessionId`
 
 ---

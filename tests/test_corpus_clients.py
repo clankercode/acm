@@ -765,9 +765,13 @@ def test_rescanning_an_unchanged_corpus_adds_nothing(scanned):
     """Second pass over already-consumed bytes must be inert."""
     store, _, _ = scanned
     before = store.one("SELECT COUNT(*) AS n, SUM(input_tokens) AS i FROM requests")
+    # SQLite-backed sources (opencode, hermes, copilot, …) store a synthetic
+    # "source:/path" cursor key in files.path rather than a real file, so only
+    # stat paths that actually exist on disk.
     offsets = {
         r["path"]: r["offset"]
-        for r in store.query("SELECT path, offset FROM files WHERE source != 'opencode'")
+        for r in store.query("SELECT path, offset FROM files")
+        if Path(r["path"]).exists()
     }
     Scanner(store, sources=available_sources()).scan_once()
     after = store.one("SELECT COUNT(*) AS n, SUM(input_tokens) AS i FROM requests")

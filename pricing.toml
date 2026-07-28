@@ -337,6 +337,15 @@ cached_input = 0.11
 output = 2.20
 source = "https://docs.z.ai/guides/overview/pricing"
 
+[models."glm-4.5"]
+input = 0.60
+cached_input = 0.11
+output = 2.20
+estimated = true
+source = "https://docs.z.ai/guides/overview/pricing"
+# The GLM-4.5 rate card is not published separately; inheriting the GLM-4.7
+# tier as a conservative estimate until Z.ai publishes distinct figures.
+
 
 # ---------------------------------------------------------------------------
 # Moonshot (Kimi) -- reached through the kimi-coding and kimi-for-coding

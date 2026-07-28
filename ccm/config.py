@@ -63,7 +63,17 @@ def _env_float(name: str, default: float) -> float:
 
 #: Every client the tool knows how to read, in display order. A source is only
 #: scanned if its root exists, so an unused client costs nothing.
-ALL_SOURCES = ("codex", "claude", "pi", "opencode", "grok")
+ALL_SOURCES = (
+    "codex",
+    "claude",
+    "pi",
+    "opencode",
+    "grok",
+    "kimi_code",
+    "kimi_cli",
+    "hermes",
+    "copilot",
+)
 
 
 def _env_sources(name: str) -> tuple[str, ...]:
@@ -98,6 +108,14 @@ class Settings:
     opencode_db: Path
     #: Grok sessions, one directory per working tree then one per session.
     grok_dir: Path
+    #: Kimi Code sessions, one tree per working tree then one per agent thread.
+    kimi_code_dir: Path
+    #: Kimi CLI sessions, one directory per working tree then one per session.
+    kimi_dir: Path
+    #: Hermes keeps its history in SQLite.
+    hermes_db: Path
+    #: Copilot CLI keeps per-request usage in SQLite.
+    copilot_db: Path
     #: Which of :data:`ALL_SOURCES` to scan.
     sources: tuple[str, ...]
 
@@ -141,6 +159,14 @@ class Settings:
                 Path.home() / ".local" / "share" / "opencode" / "opencode.db",
             ),
             grok_dir=_env_path("CCM_GROK_DIR", Path.home() / ".grok" / "sessions"),
+            kimi_code_dir=_env_path(
+                "CCM_KIMI_CODE_DIR", Path.home() / ".kimi-code" / "sessions"
+            ),
+            kimi_dir=_env_path("CCM_KIMI_DIR", Path.home() / ".kimi" / "sessions"),
+            hermes_db=_env_path("CCM_HERMES_DB", Path.home() / ".hermes" / "state.db"),
+            copilot_db=_env_path(
+                "CCM_COPILOT_DB", Path.home() / ".copilot" / "session-store.db"
+            ),
             sources=_env_sources("CCM_SOURCES"),
             db_path=_env_path("CCM_DB", STATE_DIR / "ccm.sqlite"),
             pricing_path=_env_path("CCM_PRICING", CONFIG_DIR / "pricing.toml"),
