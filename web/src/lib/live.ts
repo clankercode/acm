@@ -178,6 +178,27 @@ export function filterKey(f: Filters): string {
   ])
 }
 
+/**
+ * Whether the output-token surfaces are on show.
+ *
+ * Off by default and remembered, because it is a standing interest rather than a
+ * per-visit one: someone watching generation cost wants it every time they open
+ * the page, and someone watching cache behaviour never wants the extra columns.
+ * `?output=1` overrides the stored choice so a screenshot or a shared link can
+ * pin either view.
+ */
+export function useOutputView(): [boolean, (on: boolean) => void] {
+  const [on, setOn] = useState<boolean>(() => {
+    const forced = new URLSearchParams(window.location.search).get('output')
+    if (forced != null) return forced !== '0'
+    return localStorage.getItem('ccm-output') === '1'
+  })
+  useEffect(() => {
+    localStorage.setItem('ccm-output', on ? '1' : '0')
+  }, [on])
+  return [on, setOn]
+}
+
 export type ThemeChoice = 'system' | 'light' | 'dark'
 
 export function useTheme(): [ThemeChoice, (t: ThemeChoice) => void, number] {

@@ -133,7 +133,11 @@ def live_server(settings, day_dir, clock):
 
 def test_state_reports_a_completed_scan(client):
     state = client.get("/api/state").json()
-    assert state["scan"]["phase"] in ("tailing", "updating", "scanning")
+    # "discovering" belongs in the set: the fixture waits for the totals, not for
+    # the worker to settle, so the next poll cycle's walk can already be under way
+    # by the time this request is answered. Without it the test fails about one
+    # run in six, which is worse than useless.
+    assert state["scan"]["phase"] in ("tailing", "updating", "scanning", "discovering")
     assert state["totals"]["requests"] == 2
     assert state["totals"]["cache_rate"] == pytest.approx(1800 / 2200)
     assert state["dimensions"]["models"] == ["gpt-5.6-sol"]
@@ -185,7 +189,10 @@ def test_pricing_edit_changes_costs_without_a_rescan(client):
     long = (200 * 10.0 + 1000 * 1.0 + 60 * 45.0) / 1e6
     before = client.get("/api/totals").json()["cost"]
     assert before == pytest.approx(short + long)
-    scans_before = client.get("/api/state").json()["scan"]["files_done"]
+    # A corpus total, not the live pass's counters: the worker keeps tailing while
+    # the test runs, so `scan.files_done` legitimately moves without anything
+    # having been re-read, and asserting on it fails about one run in six.
+    read_before = client.get("/api/state").json()["quality"]["raw_token_events"]
 
     client.put(
         "/api/pricing",
@@ -196,7 +203,7 @@ def test_pricing_edit_changes_costs_without_a_rescan(client):
     after = client.get("/api/totals").json()["cost"]
     assert after == pytest.approx(dearer_short + long)
     # The corpus was not re-read; only the rate table changed.
-    assert client.get("/api/state").json()["scan"]["files_done"] == scans_before
+    assert client.get("/api/state").json()["quality"]["raw_token_events"] == read_before
 
 
 def test_long_tier_can_be_edited_independently(client):

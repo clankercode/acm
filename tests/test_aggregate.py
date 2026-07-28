@@ -179,6 +179,43 @@ def test_effective_rate_reflects_cache_quality(store, sessions_dir, pricing, clo
     assert rows["gpt-5.6-sol"]["input_tokens"] == rows["pooler/gpt-5.6-sol"]["input_tokens"]
 
 
+def test_output_rate_prices_generation_not_the_prompt(store, sessions_dir, pricing, clock):
+    """The two rates answer different questions and must not track each other.
+
+    Same prompt volume, wildly different amounts written back: the effective rate
+    barely moves while the output rate stays pinned to the model's output price,
+    which is the point of showing it separately.
+    """
+    terse = Thread(session_id="t", rollout_id="terse", clock=clock)
+    terse.meta().turn_context("gpt-5.6-sol")
+    terse.request(1_000, 900, 10)
+    windy = Thread(session_id="w", rollout_id="windy", clock=clock)
+    windy.meta().turn_context("gpt-5.6-terra")
+    windy.request(1_000, 900, 5_000)
+    ingest(store, sessions_dir, pricing, [terse, windy])
+
+    rows = {r["key"]: r for r in A.breakdown(store, pricing, A.Filters(), "model")}
+    assert rows["gpt-5.6-sol"]["output_rate"] == pytest.approx(30.0)
+    assert rows["gpt-5.6-terra"]["output_rate"] == pytest.approx(15.0)
+    for row in rows.values():
+        assert row["output_rate"] == pytest.approx(
+            row["cost_output"] / (row["output_tokens"] / 1e6)
+        )
+
+
+def test_output_rate_is_zero_when_nothing_was_generated(
+    store, sessions_dir, pricing, clock
+):
+    """A window of pure prompt replay divides by zero otherwise."""
+    t = Thread(session_id="s", rollout_id="silent", clock=clock)
+    t.meta().turn_context("gpt-5.6-sol")
+    t.request(1_000, 900, 0)
+    ingest(store, sessions_dir, pricing, [t])
+    tot = A.totals(store, pricing, A.Filters())
+    assert tot["output_tokens"] == 0
+    assert tot["output_rate"] == 0.0
+
+
 def test_breakdown_by_provider_separates_routed_from_direct(
     store, sessions_dir, pricing, clock
 ):

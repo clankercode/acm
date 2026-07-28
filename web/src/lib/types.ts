@@ -26,6 +26,9 @@ export interface Totals {
   /** USD per million input tokens processed. The headline efficiency metric. */
   effective_rate: number
   list_rate: number
+  /** USD per million output tokens generated. Not comparable with the input
+   *  rate above: output is never cached and is billed several times as dearly. */
+  output_rate: number
   efficiency: number
   avg_context: number
   unpriced_tokens: number

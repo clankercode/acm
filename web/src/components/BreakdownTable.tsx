@@ -24,26 +24,66 @@ type Col = {
   key: keyof BreakdownRow
   label: string
   render: (row: BreakdownRow) => string
+  /** The footer cell. Given every row, because a rate is a weighted ratio of two
+   *  sums rather than the sum of the column -- averaging the column would let a
+   *  one-request model drag the total around. */
+  total: (rows: BreakdownRow[]) => string
   /** Draws a proportional bar behind the cell, scaled to the column max. */
   bar?: boolean
   title?: string
+  /** Tighter than the input columns. The output group is supporting detail, and
+   *  three more full-width columns push the input ones off a narrow panel. */
+  narrow?: boolean
 }
 
+const sum = (rows: BreakdownRow[], key: keyof BreakdownRow) =>
+  rows.reduce((a, r) => a + (Number(r[key]) || 0), 0)
+
+/** Per-million rate over a whole column: total cost against total tokens. */
+const ratio = (cost: number, tokens: number) => (tokens > 0 ? cost / (tokens / 1e6) : 0)
+
 const COLUMNS: Col[] = [
-  { key: 'requests', label: 'Reqs', render: (r) => integer(r.requests) },
-  { key: 'input_tokens', label: 'Input', render: (r) => compact(r.input_tokens), bar: true },
+  {
+    key: 'requests',
+    label: 'Reqs',
+    render: (r) => integer(r.requests),
+    total: (rows) => integer(sum(rows, 'requests')),
+  },
+  {
+    key: 'input_tokens',
+    label: 'Input',
+    render: (r) => compact(r.input_tokens),
+    total: (rows) => compact(sum(rows, 'input_tokens')),
+    bar: true,
+  },
   {
     key: 'cache_rate',
     label: 'Cache',
     render: (r) => pct(r.cache_rate, 1),
+    total: (rows) => {
+      const input = sum(rows, 'input_tokens')
+      return pct(input ? sum(rows, 'cached_tokens') / input : 0, 1)
+    },
     title: 'Cached share of prompt tokens',
   },
-  { key: 'cost', label: 'Cost', render: (r) => usd(r.cost), bar: true },
-  { key: 'saved', label: 'Saved', render: (r) => usd(r.saved) },
+  {
+    key: 'cost',
+    label: 'Cost',
+    render: (r) => usd(r.cost),
+    total: (rows) => usd(sum(rows, 'cost')),
+    bar: true,
+  },
+  {
+    key: 'saved',
+    label: 'Saved',
+    render: (r) => usd(r.saved),
+    total: (rows) => usd(sum(rows, 'saved')),
+  },
   {
     key: 'effective_rate',
     label: '$/Mtok',
     render: (r) => rate(r.effective_rate),
+    total: (rows) => rate(ratio(sum(rows, 'cost'), sum(rows, 'input_tokens'))),
     bar: true,
     title: 'Cost per million input tokens processed. Lower is better.',
   },
@@ -51,7 +91,50 @@ const COLUMNS: Col[] = [
     key: 'efficiency',
     label: 'Of list',
     render: (r) => pct(r.efficiency, 0),
+    total: (rows) => {
+      const uncached = sum(rows, 'uncached_cost')
+      return pct(uncached ? sum(rows, 'cost') / uncached : 0, 0)
+    },
     title: 'Share of the undiscounted list price actually paid',
+  },
+]
+
+/**
+ * Generation, kept to the right and off by default.
+ *
+ * Deliberately a group rather than three more columns in the run: output is a
+ * different quantity from prompt tokens -- never cached, billed several times as
+ * dearly, and a fraction of the volume -- so mixing the two runs invites reading
+ * `$/Mtok` and `$/M out` as comparable numbers, which they are not.
+ */
+const OUTPUT_COLUMNS: Col[] = [
+  {
+    key: 'output_tokens',
+    label: 'Out',
+    render: (r) => compact(r.output_tokens),
+    total: (rows) => compact(sum(rows, 'output_tokens')),
+    bar: true,
+    narrow: true,
+    title: 'Tokens generated, reasoning included',
+  },
+  {
+    key: 'cost_output',
+    label: 'Out $',
+    render: (r) => usd(r.cost_output),
+    total: (rows) => usd(sum(rows, 'cost_output')),
+    narrow: true,
+    title: 'The part of the bill that paid for generation',
+  },
+  {
+    key: 'output_rate',
+    label: '$/M out',
+    render: (r) => rate(r.output_rate),
+    total: (rows) => rate(ratio(sum(rows, 'cost_output'), sum(rows, 'output_tokens'))),
+    narrow: true,
+    title:
+      'Cost per million output tokens. Effectively the model’s list output' +
+      ' price, since output is never cached — so it reads as model mix,' +
+      ' not as caching.',
   },
 ]
 
@@ -62,9 +145,12 @@ interface Props {
   /** Marks rows worth attention, e.g. a route with an unusually poor cache rate. */
   flag?: (row: BreakdownRow) => string | null
   onSelect?: (key: string) => void
+  /** Reveals the output group. Driven from the top bar, so every table on the
+   *  page shows the same columns. */
+  showOutput?: boolean
 }
 
-export function BreakdownTable({ rows, label, colors, flag, onSelect }: Props) {
+export function BreakdownTable({ rows, label, colors, flag, onSelect, showOutput }: Props) {
   const [sort, setSort] = useState<{ key: keyof BreakdownRow; desc: boolean }>({
     key: 'cost',
     desc: true,
@@ -84,28 +170,19 @@ export function BreakdownTable({ rows, label, colors, flag, onSelect }: Props) {
     return copy
   }, [rows, sort])
 
+  const columns = useMemo(
+    () => (showOutput ? [...COLUMNS, ...OUTPUT_COLUMNS] : COLUMNS),
+    [showOutput],
+  )
+
   const maxima = useMemo(() => {
     const m: Partial<Record<keyof BreakdownRow, number>> = {}
-    for (const col of COLUMNS) {
+    for (const col of columns) {
       if (!col.bar) continue
       m[col.key] = Math.max(...rows.map((r) => Number(r[col.key]) || 0), 0)
     }
     return m
-  }, [rows])
-
-  const totals = useMemo(() => {
-    const input = rows.reduce((a, r) => a + r.input_tokens, 0)
-    const cost = rows.reduce((a, r) => a + r.cost, 0)
-    return {
-      requests: rows.reduce((a, r) => a + r.requests, 0),
-      input,
-      cached: rows.reduce((a, r) => a + r.cached_tokens, 0),
-      cost,
-      saved: rows.reduce((a, r) => a + r.saved, 0),
-      uncached: rows.reduce((a, r) => a + r.uncached_cost, 0),
-      eff: input > 0 ? cost / (input / 1e6) : 0,
-    }
-  }, [rows])
+  }, [rows, columns])
 
   // `null` means "however many the cap allows"; a number is the user's own
   // choice, which survives the data changing underneath it.
@@ -196,9 +273,21 @@ export function BreakdownTable({ rows, label, colors, flag, onSelect }: Props) {
 
   if (!rows.length) return <div className="empty">Nothing in this range</div>
 
+  // The rule that separates the two groups belongs to the first output cell, so
+  // it lands in exactly one place per row whether or not the group is shown.
+  const cellClass = (col: Col, extra?: string) =>
+    [
+      extra,
+      col.narrow ? 'out' : null,
+      col === OUTPUT_COLUMNS[0] ? 'group-start' : null,
+    ]
+      .filter(Boolean)
+      .join(' ') || undefined
+
   const header = (col: Col) => (
     <th
       key={String(col.key)}
+      className={cellClass(col)}
       title={col.title}
       aria-sort={sort.key === col.key ? (sort.desc ? 'descending' : 'ascending') : undefined}
       onClick={() =>
@@ -219,6 +308,22 @@ export function BreakdownTable({ rows, label, colors, flag, onSelect }: Props) {
     >
       <table className="data">
         <thead ref={headRef}>
+          {/* Named once above the group rather than in each of its three labels,
+              which would otherwise all have to carry "out". */}
+          {showOutput && (
+            <tr className="group-row">
+              {/* A plain cell, not a header: an empty `th` is announced as a
+                  column header with no name. */}
+              <td colSpan={1 + COLUMNS.length} />
+              <th
+                className="group-start"
+                scope="colgroup"
+                colSpan={OUTPUT_COLUMNS.length}
+              >
+                Output
+              </th>
+            </tr>
+          )}
           <tr>
             <th
               aria-sort={sort.key === 'key' ? (sort.desc ? 'descending' : 'ascending') : undefined}
@@ -228,7 +333,7 @@ export function BreakdownTable({ rows, label, colors, flag, onSelect }: Props) {
             >
               Name
             </th>
-            {COLUMNS.map(header)}
+            {columns.map(header)}
           </tr>
         </thead>
         <tbody ref={bodyRef}>
@@ -249,11 +354,11 @@ export function BreakdownTable({ rows, label, colors, flag, onSelect }: Props) {
                     {note && <span className="tag">{note}</span>}
                   </span>
                 </td>
-                {COLUMNS.map((col) => {
+                {columns.map((col) => {
                   const max = maxima[col.key]
                   const value = Number(row[col.key]) || 0
                   return (
-                    <td key={String(col.key)} className={col.bar ? 'bar-cell' : undefined}>
+                    <td key={String(col.key)} className={cellClass(col, col.bar ? 'bar-cell' : undefined)}>
                       {col.bar && max ? (
                         <span className="bar" style={{ width: `${(value / max) * 100}%` }} />
                       ) : null}
@@ -268,13 +373,13 @@ export function BreakdownTable({ rows, label, colors, flag, onSelect }: Props) {
         <tfoot ref={footRef}>
           <tr>
             <td>Total</td>
-            <td>{integer(totals.requests)}</td>
-            <td>{compact(totals.input)}</td>
-            <td>{pct(totals.input ? totals.cached / totals.input : 0, 1)}</td>
-            <td>{usd(totals.cost)}</td>
-            <td>{usd(totals.saved)}</td>
-            <td>{rate(totals.eff)}</td>
-            <td>{pct(totals.uncached ? totals.cost / totals.uncached : 0, 0)}</td>
+            {/* Driven off the same list as the header, so a column can never be
+                added on one row and forgotten on the other. */}
+            {columns.map((col) => (
+              <td key={String(col.key)} className={cellClass(col)}>
+                {col.total(rows)}
+              </td>
+            ))}
           </tr>
         </tfoot>
       </table>

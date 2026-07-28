@@ -16,9 +16,21 @@ import type { ColorScale, Palette } from '../lib/palette'
 import { sourceLabel, type Filters, type SessionRow } from '../lib/types'
 import { TimeChart, type TimeSeries } from './TimeChart'
 
-type SortKey = 'first_ts' | 'cost' | 'input_tokens' | 'cache_rate' | 'effective_rate' | 'requests'
+type SortKey =
+  | 'first_ts'
+  | 'cost'
+  | 'input_tokens'
+  | 'cache_rate'
+  | 'effective_rate'
+  | 'requests'
+  | 'output_tokens'
+  | 'cost_output'
 
-const COLUMNS: { key: SortKey | 'name' | 'source'; label: string; title?: string }[] = [
+type Column = { key: SortKey | 'name' | 'source'; label: string; title?: string; out?: boolean }
+
+// Only two of the three output columns: a per-session $/M out is the model's
+// list price with extra steps, and the model is already in the row as a swatch.
+const COLUMNS: Column[] = [
   { key: 'name', label: 'Session' },
   { key: 'source', label: 'Client' },
   { key: 'first_ts', label: 'Started' },
@@ -27,6 +39,8 @@ const COLUMNS: { key: SortKey | 'name' | 'source'; label: string; title?: string
   { key: 'cache_rate', label: 'Cache' },
   { key: 'cost', label: 'Cost' },
   { key: 'effective_rate', label: '$/Mtok', title: 'Lower is better' },
+  { key: 'output_tokens', label: 'Out', title: 'Tokens generated', out: true },
+  { key: 'cost_output', label: 'Out $', title: 'What generation cost', out: true },
 ]
 
 interface Props {
@@ -34,9 +48,10 @@ interface Props {
   generation: number
   colors: ColorScale
   palette: Palette
+  showOutput?: boolean
 }
 
-export function SessionExplorer({ filters, generation, colors, palette }: Props) {
+export function SessionExplorer({ filters, generation, colors, palette, showOutput }: Props) {
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({
     key: 'first_ts',
     desc: true,
@@ -70,6 +85,22 @@ export function SessionExplorer({ filters, generation, colors, palette }: Props)
 
   useEffect(() => setLimit(60), [search, JSON.stringify(filters)])
 
+  const columns = useMemo(
+    () => COLUMNS.filter((c) => showOutput || !c.out),
+    [showOutput],
+  )
+
+  // Hiding the group must not leave the table sorted by a column nobody can see,
+  // with no header arrow to say why the order looks arbitrary.
+  useEffect(() => {
+    if (showOutput) return
+    setSort((s) =>
+      s.key === 'output_tokens' || s.key === 'cost_output'
+        ? { key: 'first_ts', desc: true }
+        : s,
+    )
+  }, [showOutput])
+
   return (
     <>
       <div className="panel">
@@ -93,9 +124,14 @@ export function SessionExplorer({ filters, generation, colors, palette }: Props)
             <table className="data">
               <thead>
                 <tr>
-                  {COLUMNS.map((col) => (
+                  {columns.map((col) => (
                     <th
                       key={col.key}
+                      className={
+                        col.out
+                          ? col.key === 'output_tokens' ? 'out group-start' : 'out'
+                          : undefined
+                      }
                       title={col.title}
                       aria-sort={
                         sort.key === col.key
@@ -161,6 +197,12 @@ export function SessionExplorer({ filters, generation, colors, palette }: Props)
                     </td>
                     <td>{usd(row.cost)}</td>
                     <td>{rate(row.effective_rate)}</td>
+                    {showOutput && (
+                      <>
+                        <td className="out group-start">{compact(row.output_tokens)}</td>
+                        <td className="out">{usd(row.cost_output)}</td>
+                      </>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -183,6 +225,7 @@ export function SessionExplorer({ filters, generation, colors, palette }: Props)
           colors={colors}
           palette={palette}
           row={rows.find((r) => r.rollout_id === selected) ?? null}
+          showOutput={showOutput}
         />
       )}
     </>
@@ -195,12 +238,14 @@ function SessionDrawer({
   colors,
   palette,
   row,
+  showOutput,
 }: {
   rolloutId: string
   onClose: () => void
   colors: ColorScale
   palette: Palette
   row: SessionRow | null
+  showOutput?: boolean
 }) {
   const { data } = useQuery((signal) => api.session(rolloutId, signal), [rolloutId])
 
@@ -210,7 +255,7 @@ function SessionDrawer({
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const { t, cacheSeries, ctxSeries, markers } = useMemo(() => {
+  const { t, cacheSeries, ctxSeries, outSeries, markers } = useMemo(() => {
     const reqs = data?.requests ?? []
     const times = reqs.map((r) => Math.round(r.ts / 1000))
     return {
@@ -229,6 +274,18 @@ function SessionDrawer({
           label: 'Prompt tokens',
           color: palette.slots[1],
           values: reqs.map((r) => r.input),
+          area: true,
+        },
+      ] as TimeSeries[],
+      // Per request rather than per bucket, which is the one place the shape of
+      // a turn is visible: a long reasoning pass is a spike here and invisible
+      // in the prompt-size chart above it.
+      outSeries: [
+        {
+          key: 'out',
+          label: 'Output tokens',
+          color: palette.slots[2],
+          values: reqs.map((r) => r.output),
           area: true,
         },
       ] as TimeSeries[],
@@ -286,6 +343,12 @@ function SessionDrawer({
                   <div className="kpi-label">$/Mtok</div>
                   <div className="kpi-value lead">{rate(data.totals.effective_rate)}</div>
                 </div>
+                {showOutput && (
+                  <div className="kpi">
+                    <div className="kpi-label">Output</div>
+                    <div className="kpi-value">{compact(data.totals.output_tokens)}</div>
+                  </div>
+                )}
               </div>
 
               <div className="panel">
@@ -331,6 +394,27 @@ function SessionDrawer({
                   />
                 </div>
               </div>
+
+              {showOutput && (
+                <div className="panel">
+                  <div className="panel-head">
+                    <h3 className="panel-title">Output per request</h3>
+                    <span className="panel-note">reasoning included</span>
+                  </div>
+                  <div className="panel-body">
+                    <TimeChart
+                      t={t}
+                      series={outSeries}
+                      palette={palette}
+                      height={150}
+                      bucketSeconds={60}
+                      format={(v) => compact(v)}
+                      unit="tokens"
+                      markers={markers}
+                    />
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>

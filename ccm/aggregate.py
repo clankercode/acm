@@ -336,6 +336,12 @@ class Totals:
             "saved_fraction": (1 - self.cost / self.uncached) if self.uncached else 0.0,
             "effective_rate": effective_rate(self.cost, inp),
             "list_rate": effective_rate(self.uncached, inp),
+            # The generation side of the same ratio, and not comparable with the
+            # rate above: output is never cached and is billed several times the
+            # input price, so a few tokens of it can outweigh a large prompt.
+            # Derived here rather than in the client so every surface that shows
+            # a row of totals -- tables, sessions, calendar, heatmap -- agrees.
+            "output_rate": effective_rate(self.output_cost, self.output_tokens),
             "efficiency": (self.cost / self.uncached) if self.uncached else 0.0,
             "avg_context": (inp / self.n) if self.n else 0.0,
             "unpriced_tokens": self.unpriced_tokens,

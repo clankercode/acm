@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from './lib/api'
 import { compact, pct, rate, repoLabel, shortModel, usd } from './lib/format'
-import { filterKey, useLiveState, useQuery, useTheme } from './lib/live'
+import { filterKey, useLiveState, useOutputView, useQuery, useTheme } from './lib/live'
 import { ColorScale, SLOT_COUNT, readPalette } from './lib/palette'
 import {
   EMPTY_FILTERS,
@@ -31,9 +31,14 @@ function metric(
     written: (number | null)[]
     uncached: (number | null)[]
     n: (number | null)[]
+    output?: (number | null)[]
+    cost_output?: (number | null)[]
   },
   kind:
     | 'eff'
+    | 'output'
+    | 'outrate'
+    | 'outcost'
     | 'cache'
     | 'cost'
     | 'saved'
@@ -53,9 +58,23 @@ function metric(
     const written = cols.written?.[i] ?? 0
     const unc = cols.uncached[i]
     const reqs = cols.n[i]
+    const generated = cols.output?.[i] ?? null
+    const outCost = cols.cost_output?.[i] ?? null
     switch (kind) {
       case 'eff':
         if (cost != null && input) out[i] = cost / (input / 1e6)
+        break
+      case 'output':
+        out[i] = generated
+        break
+      case 'outcost':
+        out[i] = outCost
+        break
+      case 'outrate':
+        // Only where something was actually generated: a bucket of pure prompt
+        // replay has no rate, and plotting zero would draw a dive to the axis
+        // that reads as a price cut.
+        if (outCost != null && generated) out[i] = outCost / (generated / 1e6)
         break
       case 'cache':
         if (cached != null && input) out[i] = (cached / input) * 100
@@ -95,6 +114,7 @@ const CALENDAR_LABELS: Record<CalendarMetric, string> = {
   input_tokens: 'prompt tokens',
   cost: 'spend',
   cache_rate: 'cache hit rate',
+  output_tokens: 'output tokens',
 }
 
 function toSeries(
@@ -117,6 +137,7 @@ function toSeries(
 export default function App() {
   const { state, scan, connected, newBuild } = useLiveState()
   const [theme, setTheme, themeEpoch] = useTheme()
+  const [showOutput, setShowOutput] = useOutputView()
   const [range, setRange] = useState<RangeKey>('7d')
   const [bucket, setBucket] = useState('hour')
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
@@ -374,6 +395,13 @@ export default function App() {
     ]
   }, [overall.data, palette])
 
+  // Volume and spend rather than $/Mtok out: output is never cached and has no
+  // context tier, so its rate is the model's list price and a chart of it is a
+  // chart of model mix -- which the two stacks below already show, in the units
+  // that matter.
+  const outputSeries = toSeries(byModel.data, colors, 'output', { area: true })
+  const outputCostSeries = toSeries(byModel.data, colors, 'outcost', { area: true })
+
   const repoSeries = toSeries(byRepo.data, repoColors, 'cost', {
     area: true,
     label: repoLabel,
@@ -382,6 +410,12 @@ export default function App() {
   const routeInsight = useMemo(() => findRoutingGap(modelRows.data ?? []), [modelRows.data])
 
   const defaultThreshold = pricing.data?.default_threshold ?? 200000
+
+  // Turning the output view off must not leave the calendar on a metric whose
+  // button has just gone, with the heading as the only clue.
+  useEffect(() => {
+    if (!showOutput && calMetric === 'output_tokens') setCalMetric('input_tokens')
+  }, [showOutput, calMetric])
 
   useEffect(() => {
     document.title = totals.data
@@ -403,12 +437,14 @@ export default function App() {
         onFilters={setFilters}
         theme={theme}
         onTheme={setTheme}
+        showOutput={showOutput}
+        onShowOutput={setShowOutput}
         colors={colors}
         sourceColors={sourceColors}
       />
 
       <main className="main">
-        <KpiStrip totals={totals.data} previous={previous.data} />
+        <KpiStrip totals={totals.data} previous={previous.data} showOutput={showOutput} />
 
         {routeInsight && (
           <div className="callout">
@@ -481,6 +517,7 @@ export default function App() {
                 <BreakdownTable
                   rows={sourceRows.data ?? []}
                   label={sourceLabel}
+                  showOutput={showOutput}
                   colors={sourceColors}
                   onSelect={(k) =>
                     setFilters((f) => ({
@@ -671,6 +708,57 @@ export default function App() {
             </div>
           </section>
 
+          {showOutput && (
+            <>
+              <section className="panel span-4">
+                <div className="panel-head">
+                  <h2 className="panel-title">Output tokens by model</h2>
+                  <span className="panel-note">
+                    generated, reasoning included · per {bucketLabel(bucketSeconds)}
+                  </span>
+                </div>
+                <div className="panel-body">
+                  <TimeChart
+                    t={t}
+                    series={outputSeries}
+                    palette={palette}
+                    bucketSeconds={bucketSeconds}
+                    format={(v) => compact(v)}
+                    unit="tokens"
+                    stacked
+                    syncKey="ccm"
+                  />
+                </div>
+              </section>
+
+              <section className="panel span-4">
+                <div className="panel-head">
+                  <h2 className="panel-title">Output spend by model</h2>
+                  <span className="panel-note">
+                    {totals.data
+                      ? `${pct(
+                          totals.data.cost ? totals.data.cost_output / totals.data.cost : 0,
+                          0,
+                        )} of spend in this window`
+                      : 'the part of the bill caching cannot touch'}
+                  </span>
+                </div>
+                <div className="panel-body">
+                  <TimeChart
+                    t={t}
+                    series={outputCostSeries}
+                    palette={palette}
+                    bucketSeconds={bucketSeconds}
+                    format={(v) => usd(v)}
+                    unit="USD"
+                    stacked
+                    syncKey="ccm"
+                  />
+                </div>
+              </section>
+            </>
+          )}
+
           <section className="panel span-4">
             <div className="panel-head">
               <h2 className="panel-title">Spend by project</h2>
@@ -721,6 +809,15 @@ export default function App() {
                   >
                     Cache
                   </button>
+                  {showOutput && (
+                    <button
+                      type="button"
+                      aria-pressed={calMetric === 'output_tokens'}
+                      onClick={() => setCalMetric('output_tokens')}
+                    >
+                      Output
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -777,6 +874,7 @@ export default function App() {
             <BreakdownTable
               rows={modelRows.data ?? []}
               label={shortModel}
+              showOutput={showOutput}
               colors={colors}
               flag={(r) => (r.cache_rate < 0.85 ? 'poor cache' : null)}
               onSelect={(k) =>
@@ -789,8 +887,12 @@ export default function App() {
           </div>
         </section>
 
-        <div className="grid two">
-          <section className="panel">
+        {/* Two half-width tables until the output group is on, at which point
+            eleven numeric columns no longer fit half a row and each takes a full
+            one -- the alternative is two panels that scroll sideways to reach the
+            columns you just asked for. */}
+        <div className={showOutput ? 'grid' : 'grid two'}>
+          <section className={'panel' + (showOutput ? ' span-12' : '')}>
             <div className="panel-head">
               <h2 className="panel-title">By route</h2>
               <span className="panel-note">direct versus proxied</span>
@@ -799,17 +901,22 @@ export default function App() {
               <BreakdownTable
                 rows={providerRows.data ?? []}
                 label={(k) => (k === '' ? 'direct' : k)}
+                showOutput={showOutput}
               />
             </div>
           </section>
 
-          <section className="panel">
+          <section className={'panel' + (showOutput ? ' span-12' : '')}>
             <div className="panel-head">
               <h2 className="panel-title">By underlying model</h2>
               <span className="panel-note">routes collapsed together</span>
             </div>
             <div className="panel-body">
-              <BreakdownTable rows={baseRows.data ?? []} label={shortModel} />
+              <BreakdownTable
+                rows={baseRows.data ?? []}
+                label={shortModel}
+                showOutput={showOutput}
+              />
             </div>
           </section>
         </div>
@@ -822,6 +929,7 @@ export default function App() {
             <BreakdownTable
               rows={repoRows.data ?? []}
               label={repoLabel}
+              showOutput={showOutput}
               colors={repoColors}
               onSelect={(k) =>
                 setFilters((f) => ({
@@ -892,6 +1000,7 @@ export default function App() {
           generation={generation}
           colors={colors}
           palette={palette}
+          showOutput={showOutput}
         />
 
         {/* Full width: eight numeric columns do not fit a half-width panel

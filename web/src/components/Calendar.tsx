@@ -10,12 +10,13 @@ const MONTHS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ]
 
-export type CalendarMetric = 'input_tokens' | 'cost' | 'cache_rate'
+export type CalendarMetric = 'input_tokens' | 'cost' | 'cache_rate' | 'output_tokens'
 
 const LABELS: Record<CalendarMetric, string> = {
   input_tokens: 'prompt tokens',
   cost: 'spend',
   cache_rate: 'cache hit rate',
+  output_tokens: 'output tokens',
 }
 
 interface Props {
@@ -59,7 +60,10 @@ export function Calendar({ days, palette, metric }: Props) {
   const current = month ?? months[months.length - 1] ?? monthKey(new Date())
 
   const value = (d: CalendarDay) =>
-    metric === 'cost' ? d.cost : metric === 'cache_rate' ? d.cache_rate : d.input_tokens
+    metric === 'cost' ? d.cost
+    : metric === 'cache_rate' ? d.cache_rate
+    : metric === 'output_tokens' ? d.output_tokens
+    : d.input_tokens
 
   const grid = useMemo(() => {
     const year = Math.floor(current / 12)
