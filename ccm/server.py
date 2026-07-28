@@ -21,11 +21,19 @@ from .config import PACKAGE_ROOT, PROJECT_ROOT, Settings, settings as default_se
 from .engine import Engine
 
 
-def version(name: str) -> str:
+#: The distribution name, which is not the import name -- ``version("ccm")``
+#: always answered "dev", so exports and the build banner never carried a real
+#: version.
+DIST_NAME = "codex-cache-monitor"
+
+
+def version(name: str = DIST_NAME) -> str:
     try:
         return _pkg_version(name)
     except PackageNotFoundError:
+        # Running from a checkout with nothing installed.
         return "dev"
+
 
 log = logging.getLogger("ccm.server")
 
@@ -66,7 +74,7 @@ def build_identity() -> dict:
     process, so hashing it outright is cheaper than being clever about it.
     """
     h = hashlib.sha256()
-    h.update(version("ccm").encode())
+    h.update(version().encode())
     dist = web_dist()
     if dist is not None:
         try:
@@ -81,7 +89,7 @@ def build_identity() -> dict:
             h.update(path.read_bytes())
         except OSError:  # pragma: no cover -- raced with an install
             pass
-    return {"version": version("ccm"), "id": h.hexdigest()[:16]}
+    return {"version": version(), "id": h.hexdigest()[:16]}
 
 
 class ORJSONResponse(JSONResponse):
@@ -329,7 +337,7 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
             engine.pricing,
             label=label,
             origins=origins,
-            tool_version=version("ccm"),
+            tool_version=version(),
         )
         name = re.sub(r"[^A-Za-z0-9._-]+", "-", bundle["label"]).strip("-") or "export"
         return Response(
