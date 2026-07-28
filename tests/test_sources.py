@@ -20,6 +20,7 @@ from ccm.scanner import Scanner
 from ccm.sources import (
     ClaudeSource,
     GrokSource,
+    KimiCodeSource,
     OpenCodeSource,
     PiSource,
     project_label,
@@ -504,6 +505,101 @@ def test_grok_labels_the_project_even_with_no_summary(tmp_path, store, clock):
     (row,) = store.query("SELECT cwd, repo FROM sessions WHERE source = 'grok'")
     assert row["cwd"] == "/home/dev/project"
     assert row["repo"] == "project"
+
+
+# ---------------------------------------------------------------------------
+# Kimi Code
+
+
+def test_kimi_code_reassembles_the_whole_prompt(tmp_path, store, clock):
+    """``inputOther`` is the uncached remainder; cache reads/writes are addends."""
+    from .conftest import KimiCodeWire
+
+    root = tmp_path / "kc"
+    KimiCodeWire("kc1", clock).request(
+        fresh=400, cache_read=20_000, cache_write=3_000, output=300, message_id="msg_1"
+    ).write(root)
+
+    Scanner(store, sources=[KimiCodeSource(root)]).scan_once()
+    (row,) = rows(store, "kimi_code")
+    assert row["input_tokens"] == 23_400
+    assert row["cached_tokens"] == 20_000
+    assert row["cache_write_tokens"] == 3_000
+    assert row["output_tokens"] == 300
+    assert row["reasoning_tokens"] == 0
+
+
+def test_kimi_code_attributes_model_from_the_preceding_request(tmp_path, store, clock):
+    from .conftest import KimiCodeWire
+
+    root = tmp_path / "kc"
+    KimiCodeWire("kc1", clock).request(
+        fresh=10, cache_read=10, output=5, message_id="msg_2"
+    ).write(root)
+
+    Scanner(store, sources=[KimiCodeSource(root)]).scan_once()
+    (row,) = rows(store, "kimi_code")
+    assert row["model"] == "kimi-code/kimi-for-coding"
+    assert row["base_model"] == "kimi-for-coding"
+    assert row["provider"] == "kimi-code"
+
+
+def test_kimi_code_marks_subagent_threads_from_the_agent_directory(
+    tmp_path, store, clock
+):
+    from .conftest import KimiCodeWire
+
+    root = tmp_path / "kc"
+    KimiCodeWire("kc1", clock, agent="main").request(
+        fresh=10, cache_read=0, output=1, message_id="parent_req"
+    ).write(root)
+    KimiCodeWire("kc1", clock, agent="agent-0").request(
+        fresh=20, cache_read=0, output=2, message_id="child_req"
+    ).write(root)
+
+    Scanner(store, sources=[KimiCodeSource(root)]).scan_once()
+    by_id = {
+        r["rollout_id"]: r
+        for r in store.query("SELECT * FROM sessions WHERE source = 'kimi_code'")
+    }
+    flags = {rid: r["is_subagent"] for rid, r in by_id.items()}
+    assert flags["kimi_code:kc1:main"] == 0
+    assert flags["kimi_code:kc1:agent-0"] == 1
+    assert by_id["kimi_code:kc1:agent-0"]["parent_thread_id"] == "kimi_code:kc1:main"
+
+
+def test_kimi_code_ingest_is_idempotent(tmp_path, store, clock):
+    from .conftest import KimiCodeWire
+
+    root = tmp_path / "kc"
+    KimiCodeWire("kc1", clock).request(
+        fresh=10, cache_read=10, output=5, message_id="r1"
+    ).write(root)
+
+    scanner = Scanner(store, sources=[KimiCodeSource(root)])
+    scanner.scan_once()
+    store.reset_file(store.query("SELECT path FROM files")[0]["path"])
+    scanner.scan_once()
+    assert len(rows(store, "kimi_code")) == 1
+
+
+def test_kimi_code_resumes_mid_file(tmp_path, store, clock):
+    from .conftest import KimiCodeWire
+
+    root = tmp_path / "kc"
+    session = KimiCodeWire("kc1", clock).request(
+        fresh=10, cache_read=0, output=1, message_id="r1"
+    )
+    path = session.write(root)
+
+    scanner = Scanner(store, sources=[KimiCodeSource(root)])
+    scanner.scan_once()
+    assert len(rows(store, "kimi_code")) == 1
+
+    session.request(fresh=20, cache_read=0, output=2, message_id="r2").write(root)
+    scanner.scan_once()
+    got = {r["dk"]: r for r in rows(store, "kimi_code")}
+    assert set(got) == {"r1", "r2"}
 
 
 # ---------------------------------------------------------------------------

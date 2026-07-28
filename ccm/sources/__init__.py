@@ -19,6 +19,7 @@ from .base import Source, Unit, UnitResult, project_label
 from .claude import ClaudeSource
 from .codex import CodexSource
 from .grok import GrokSource
+from .kimi_code import KimiCodeSource
 from .opencode import OpenCodeSource
 from .pi import PiSource
 
@@ -26,6 +27,7 @@ __all__ = [
     "ClaudeSource",
     "CodexSource",
     "GrokSource",
+    "KimiCodeSource",
     "OpenCodeSource",
     "PiSource",
     "Source",

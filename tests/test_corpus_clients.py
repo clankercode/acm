@@ -21,7 +21,13 @@ import pytest
 from ccm import aggregate as A
 from ccm.pricing import PricingTable, compute_tier
 from ccm.scanner import Scanner
-from ccm.sources import ClaudeSource, GrokSource, OpenCodeSource, PiSource
+from ccm.sources import (
+    ClaudeSource,
+    GrokSource,
+    KimiCodeSource,
+    OpenCodeSource,
+    PiSource,
+)
 from ccm.store import Store
 
 from .conftest import UNPRICED_BY_DESIGN, unpriced_names
@@ -30,12 +36,19 @@ CLAUDE = Path.home() / ".claude" / "projects"
 PI = Path.home() / ".pi" / "agent" / "sessions"
 OPENCODE = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
 GROK = Path.home() / ".grok" / "sessions"
+KIMI_CODE = Path.home() / ".kimi-code" / "sessions"
 REPO_PRICING = Path(__file__).resolve().parent.parent / "pricing.toml"
 
 pytestmark = [
     pytest.mark.corpus,
     pytest.mark.skipif(
-        not (CLAUDE.exists() or PI.exists() or OPENCODE.exists() or GROK.exists()),
+        not (
+            CLAUDE.exists()
+            or PI.exists()
+            or OPENCODE.exists()
+            or GROK.exists()
+            or KIMI_CODE.exists()
+        ),
         reason="no non-Codex client histories on this machine",
     ),
 ]
@@ -51,6 +64,8 @@ def available_sources():
         sources.append(OpenCodeSource(OPENCODE))
     if GROK.exists():
         sources.append(GrokSource(GROK))
+    if KIMI_CODE.exists():
+        sources.append(KimiCodeSource(KIMI_CODE))
     return sources
 
 
@@ -420,6 +435,77 @@ def test_grok_sessions_carry_their_project_and_lineage(scanned):
     for row in rows:
         # A subagent knows its parent; a parent does not claim one.
         assert bool(row["parent_thread_id"]) == bool(row["is_subagent"])
+
+
+def reference_kimi_code(offsets: dict[str, int]) -> dict:
+    """A second, deliberately naive implementation of the Kimi Code rules.
+
+    Stdlib json and plain dicts, sharing no code with the reader under test.
+    Reassembles the whole prompt the same way the reader does, so an exact
+    token-for-token match is the gate.
+    """
+    rows: dict[str, tuple] = {}
+    raw = 0
+    for path, limit in offsets.items():
+        with open(path, "rb") as fh:
+            data = fh.read(limit)
+        for line in data.split(b"\n"):
+            if b'"step.end"' not in line or not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            if obj.get("type") != "context.append_loop_event":
+                continue
+            event = obj.get("event") or {}
+            if event.get("type") != "step.end":
+                continue
+            usage = event.get("usage")
+            if not isinstance(usage, dict):
+                continue
+            mid = event.get("messageId")
+            if not mid:
+                continue
+            raw += 1
+            fresh = usage.get("inputOther") or 0
+            cache_read = usage.get("inputCacheRead") or 0
+            cache_write = usage.get("inputCacheCreation") or 0
+            rows[mid] = (
+                fresh + cache_read + cache_write,
+                cache_read,
+                cache_write,
+                usage.get("output") or 0,
+            )
+    return {"requests": rows, "raw": raw}
+
+
+@pytest.mark.skipif(not KIMI_CODE.exists(), reason="no Kimi Code history")
+def test_kimi_code_matches_an_independent_implementation(scanned):
+    """The gate: identical bytes in, identical deduped requests out."""
+    store, _, _ = scanned
+    offsets = {
+        row["path"]: row["offset"]
+        for row in store.query(
+            "SELECT path, offset FROM files WHERE source = 'kimi_code'"
+        )
+    }
+    if not offsets:
+        pytest.skip("Kimi Code history is empty")
+    reference = reference_kimi_code(offsets)
+    ours = {
+        row["dk"]: row
+        for row in store.query("SELECT * FROM requests WHERE source = 'kimi_code'")
+    }
+
+    assert len(ours) == len(reference["requests"])
+    assert set(ours) == set(reference["requests"])
+    for key, ref in reference["requests"].items():
+        mine = ours[key]
+        assert mine["input_tokens"] == ref[0], key
+        assert mine["cached_tokens"] == ref[1], key
+        assert mine["cache_write_tokens"] == ref[2], key
+        assert mine["output_tokens"] == ref[3], key
 
 
 def test_prompt_subsets_never_exceed_the_prompt(scanned):

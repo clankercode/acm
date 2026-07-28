@@ -628,6 +628,96 @@ def write_grok_config(root: Path, **models: dict) -> Path:
     return path
 
 
+@dataclass
+class KimiCodeWire:
+    """Builds one Kimi Code agent wire log under a realistic session layout.
+
+    A step is one API call and carries per-request usage plus a messageId, the
+    way the real client does. An ``llm.request`` line sets the model the steps
+    bill at, and is emitted automatically before each step unless overridden.
+    """
+
+    session_id: str
+    clock: datetime
+    project: str = "ccm-clients"
+    agent: str = "main"
+    model_alias: str = "kimi-code/kimi-for-coding"
+    model: str = "kimi-for-coding"
+    effort: str = "on"
+    lines: list[str] = field(default_factory=list)
+
+    def advance(self, seconds: float = 1.0) -> None:
+        self.clock += timedelta(seconds=seconds)
+
+    def _emit(self, obj: dict) -> None:
+        self.lines.append(json.dumps(obj, separators=(",", ":")))
+
+    def request(
+        self,
+        *,
+        fresh: int,
+        cache_read: int,
+        output: int,
+        cache_write: int = 0,
+        message_id: str | None = None,
+    ) -> KimiCodeWire:
+        self.advance(1)
+        ts = int(self.clock.timestamp() * 1000)
+        self._emit(
+            {
+                "type": "llm.request",
+                "kind": "loop",
+                "provider": "kimi",
+                "model": self.model,
+                "modelAlias": self.model_alias,
+                "thinkingEffort": self.effort,
+                "time": ts,
+            }
+        )
+        self.advance(1)
+        ts2 = int(self.clock.timestamp() * 1000)
+        self._emit(
+            {
+                "type": "context.append_loop_event",
+                "event": {
+                    "type": "step.end",
+                    "uuid": str(uuid.uuid4()),
+                    "turnId": "0",
+                    "step": len(self.lines),
+                    "usage": {
+                        "inputOther": fresh,
+                        "output": output,
+                        "inputCacheRead": cache_read,
+                        "inputCacheCreation": cache_write,
+                    },
+                    "messageId": message_id or f"chatcmpl-{uuid.uuid4().hex[:18]}",
+                },
+                "time": ts2,
+            }
+        )
+        return self
+
+    def chatter(self) -> KimiCodeWire:
+        """A line with no usage, which the reader must skip."""
+        self.advance(0.5)
+        self._emit(
+            {
+                "type": "context.append_message",
+                "message": {"role": "user", "content": "hi"},
+                "time": int(self.clock.timestamp() * 1000),
+            }
+        )
+        return self
+
+    def write(self, root: Path) -> Path:
+        d = root / f"wd_{self.project}_{uuid.uuid4().hex[:12]}"
+        d = d / f"session_{self.session_id}" / "agents" / self.agent
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / "wire.jsonl"
+        path.write_text("".join(line + "\n" for line in self.lines))
+        return path
+
+
 @pytest.fixture
 def sessions_dir(tmp_path: Path) -> Path:
     d = tmp_path / "sessions" / "2026" / "07" / "01"
