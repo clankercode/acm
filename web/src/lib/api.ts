@@ -14,6 +14,7 @@ import type {
   SessionDetail,
   SessionRow,
   Totals,
+  UpdateStatus,
 } from './types'
 
 function query(filters: Filters, extra: Record<string, string | number> = {}) {
@@ -109,6 +110,24 @@ export const api = {
     const res = await fetch(`/api/scan/${paused ? 'pause' : 'resume'}`, { method: 'POST' })
     if (!res.ok) throw new Error(await res.text())
     return ((await res.json()) as { paused: boolean }).paused
+  },
+
+  // -- self-update --------------------------------------------------------
+
+  updateStatus: (signal?: AbortSignal) => get<UpdateStatus>('/api/update', signal),
+
+  /**
+   * Pull, rebuild, reinstall and restart. Refused (403) from anywhere but the
+   * machine running the monitor, and (409) when one is already in flight.
+   *
+   * The server it is asked of is the server it replaces, so the last thing this
+   * starts is the death of the connection it was asked over. Callers should poll
+   * the status and expect the failures that come with that.
+   */
+  async startUpdate(): Promise<UpdateStatus> {
+    const res = await fetch('/api/update', { method: 'POST' })
+    if (!res.ok) throw new Error(((await res.json()) as { detail?: string }).detail ?? 'failed')
+    return res.json()
   },
 
   // -- reference prices ---------------------------------------------------

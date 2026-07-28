@@ -261,6 +261,19 @@ export interface BuildInfo {
   id: string
 }
 
+/** What the server will say about deploying a new version of itself. */
+export interface UpdateStatus {
+  available: boolean
+  /** Why not, fit to show the user. Null when it is available. */
+  reason: string | null
+  running: boolean
+  /** 'ok' | 'failed' for the last finished attempt, null if there was none. */
+  outcome: string | null
+  /** Tail of the update transcript. Empty before the first attempt. */
+  log: string
+  checkout: string | null
+}
+
 export type Nums = (number | null)[]
 
 export interface SeriesColumns {

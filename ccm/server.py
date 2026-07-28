@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from . import aggregate as A, portable
 from .config import PACKAGE_ROOT, PROJECT_ROOT, Settings, settings as default_settings
 from .engine import Engine
+from .selfupdate import Updater
 
 
 #: The distribution name, which is not the import name -- ``version("ccm")``
@@ -155,6 +156,8 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
         lifespan=lifespan,
     )
     app.state.engine = engine
+    updater = Updater(settings)
+    app.state.updater = updater
     # Read once: the answer only changes when the process is replaced, and this
     # rides along on every snapshot and every stream reconnect.
     app.state.build = build_identity()
@@ -406,6 +409,30 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
     @app.post("/api/scan/resume")
     def post_resume() -> dict:
         return {"paused": engine.set_paused(False)}
+
+    # -- self-update --------------------------------------------------------
+
+    @app.get("/api/update")
+    def get_update(request: Request) -> dict:
+        status = updater.status()
+        # The address is part of the answer, not just of the decision: the button
+        # has to be able to say "not from here" before it is pressed.
+        refusal = updater.may_start_from(request.client.host if request.client else None)
+        if refusal:
+            return {**status.as_dict(), "available": False, "reason": refusal}
+        return status.as_dict()
+
+    @app.post("/api/update")
+    def post_update(request: Request) -> dict:
+        refusal = updater.may_start_from(request.client.host if request.client else None)
+        if refusal:
+            # 403 rather than 409: this is about who is asking, and no amount of
+            # retrying from the same place will change the answer.
+            raise HTTPException(403, refusal)
+        try:
+            return updater.start().as_dict()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     # -- live stream --------------------------------------------------------
 
