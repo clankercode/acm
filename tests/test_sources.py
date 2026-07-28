@@ -961,6 +961,7 @@ def test_absent_corpora_are_skipped_not_errors(tmp_path, store):
         copilot_db=tmp_path / "nope8.db",
         gemini_dir=tmp_path / "nope9",
         cursor_agent_dir=tmp_path / "nope10",
+        cursor_agent_capture_interval=3600.0,
         sources=(
             "codex",
             "claude",
@@ -1290,3 +1291,23 @@ def test_cursor_agent_resumes_model_from_carry_across_scans(tmp_path, store):
     assert row["dk"] == "inv-resume"
     assert row["model"] == "grok-4.5"
     assert row["input_tokens"] == 5000
+
+
+def test_cursor_agent_capture_is_throttled(tmp_path):
+    """Capture runs on first plan() but skips within the interval."""
+    live = tmp_path / "cursor-agent-logs-1000"
+    live.mkdir(parents=True)
+    (live / "session-1.log").write_text("data\n")
+
+    cache = tmp_path / "cache"
+    src = CursorAgentSource(cache, live_root=tmp_path, capture_interval=3600.0)
+
+    # First call: capture runs immediately.
+    src.plan(type("S", (), {"file_cursors": lambda self: {}})())
+    assert src._last_capture is not None
+    assert (cache / "cursor-agent-logs-1000_session-1.log").exists()
+
+    # Add a new live log. Within the interval, capture should NOT run.
+    (live / "session-2.log").write_text("data\n")
+    src.plan(type("S", (), {"file_cursors": lambda self: {}})())
+    assert not (cache / "cursor-agent-logs-1000_session-2.log").exists()

@@ -97,6 +97,7 @@ def engine_with(tmp_path, source) -> Engine:
         copilot_db=tmp_path / "copilot.db",
         gemini_dir=tmp_path / "gemini",
         cursor_agent_dir=tmp_path / "cursor-agent",
+        cursor_agent_capture_interval=3600.0,
         sources=(),
         db_path=tmp_path / "ccm.sqlite",
         pricing_path=tmp_path / "pricing.toml",

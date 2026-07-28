@@ -122,6 +122,9 @@ class Settings:
     gemini_dir: Path
     #: cursor-agent debug logs, mirrored out of /tmp for durability.
     cursor_agent_dir: Path
+    #: How often (seconds) to mirror /tmp cursor-agent logs into the cache.
+    #: The logs change slowly, so the default avoids stat-storming /tmp.
+    cursor_agent_capture_interval: float
     #: Which of :data:`ALL_SOURCES` to scan.
     sources: tuple[str, ...]
 
@@ -179,6 +182,9 @@ class Settings:
             cursor_agent_dir=_env_path(
                 "CCM_CURSOR_AGENT_DIR",
                 Path.home() / ".cache" / "ccm" / "cursor-logs",
+            ),
+            cursor_agent_capture_interval=_env_float(
+                "CCM_CURSOR_AGENT_CAPTURE_INTERVAL", 3600.0
             ),
             sources=_env_sources("CCM_SOURCES"),
             db_path=_env_path("CCM_DB", STATE_DIR / "ccm.sqlite"),

@@ -64,6 +64,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 
 import orjson
@@ -278,11 +279,22 @@ class CursorAgentSource(JsonlSource):
     name = "cursor_agent"
     label = "cursor-agent"
 
-    def __init__(self, cache_dir: Path, live_root: Path = LIVE_ROOT):
+    def __init__(
+        self,
+        cache_dir: Path,
+        live_root: Path = LIVE_ROOT,
+        *,
+        capture_interval: float = 3600.0,
+    ):
         super().__init__(cache_dir)
         self.live_root = live_root
-        # Watching the live dir means CCM's inotify wakes the scanner as soon
-        # as cursor-agent appends, which then captures into the cache.
+        self.capture_interval = capture_interval
+        #: monotonic timestamp of the last capture; None = never (run now).
+        self._last_capture: float | None = None
+        # The live dir is in watch_roots for completeness, but the inotify
+        # watcher only fires on .jsonl/.db files, so the poll fallback (every
+        # poll_seconds) is what actually drives capture. The capture itself is
+        # throttled to once per capture_interval to avoid stat-storming /tmp.
         self.watch_roots = (cache_dir, live_root)
 
     def available(self) -> bool:
@@ -319,12 +331,20 @@ class CursorAgentSource(JsonlSource):
 
     def plan(self, store):
         # Self-contained capture: mirror any new/changed live logs into the
-        # stable cache before planning over it. This is why no external daemon
-        # or hook is required -- the scanner's own wake-up drives the capture.
-        try:
-            capture_live_logs(self.root, self.live_root)
-        except OSError:
-            pass
+        # stable cache before planning over it. Throttled to once per
+        # capture_interval (default 1h) because the logs change slowly --
+        # running it every poll cycle (2s) would stat-storm /tmp for nothing.
+        # First call runs immediately (None → run now).
+        now = time.monotonic()
+        if (
+            self._last_capture is None
+            or now - self._last_capture >= self.capture_interval
+        ):
+            try:
+                capture_live_logs(self.root, self.live_root)
+            except OSError:
+                pass
+            self._last_capture = now
         return super().plan(store)
 
     def parse(self, path: Path, cursor: dict | None, start_offset: int) -> ParseOutput:

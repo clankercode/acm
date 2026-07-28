@@ -58,7 +58,9 @@ _BUILDERS = {
     "hermes": lambda s: HermesSource(s.hermes_db),
     "copilot": lambda s: CopilotSource(s.copilot_db),
     "gemini": lambda s: GeminiSource(s.gemini_dir),
-    "cursor_agent": lambda s: CursorAgentSource(s.cursor_agent_dir),
+    "cursor_agent": lambda s: CursorAgentSource(
+        s.cursor_agent_dir, capture_interval=s.cursor_agent_capture_interval
+    ),
 }
 
 

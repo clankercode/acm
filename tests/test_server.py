@@ -52,6 +52,7 @@ def settings(tmp_path, pricing) -> Settings:
         copilot_db=tmp_path / "copilot.db",
         gemini_dir=tmp_path / "gemini",
         cursor_agent_dir=tmp_path / "cursor-agent",
+        cursor_agent_capture_interval=3600.0,
         sources=("codex", "claude", "pi", "opencode", "grok"),
         db_path=tmp_path / "ccm.sqlite",
         pricing_path=pricing.path,
