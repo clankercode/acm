@@ -433,7 +433,10 @@ minutes at full disk, and the answer to wanting the machine back has to be bette
 than killing the server. Nothing is lost: rows are committed as they are read and
 each file keeps a stored cursor, so **Resume** carries on mid-file. Refresh is
 refused while paused, since a full rescan drops the derived tables and there
-would be no worker to refill them.
+would be no worker to refill them. The pause is recorded in the store and
+restored on startup: a restart, or a `just update` that replaces the wheel,
+leaves it paused rather than handing your disk back to a cold pass while you are
+still using the machine. Only **Resume** lifts it.
 
 Every snapshot names the build that served it — the package version, the built
 `index.html` and the contents of the installed Python sources, hashed. A tab is
@@ -451,7 +454,7 @@ that existed at start-up and each new day creates one.
 ## Tests
 
 ```
-just test                     # 175 unit and integration tests, ~9s
+just test                     # 176 unit and integration tests, ~9s
 just test-corpus              # 28 tests against the real corpora, ~44s
 just check                    # what CI runs: tests, tsc, and a wheel that must serve
 ```

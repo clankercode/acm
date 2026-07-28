@@ -169,6 +169,33 @@ def test_pause_and_resume_racing_each_other_leave_one_consistent_answer(tmp_path
     assert engine.paused in (True, False)
 
 
+def test_a_pause_survives_a_restart(tmp_path):
+    """An update must not hand the disk back to a cold scan behind your back."""
+    source = SlowSource(count=40, delay=0.02)
+    engine = engine_with(tmp_path, source)
+    engine.set_paused(True)
+    engine.stop()
+
+    # A second engine over the same store is what a restart looks like.
+    restarted = engine_with(tmp_path, source)
+    assert restarted.paused is True
+    restarted.start(watch=False)
+    try:
+        assert wait_until(lambda: restarted.scanner.progress.phase == "paused")
+        assert restarted.scanner.progress.as_dict()["paused"] is True
+        # Nothing was read: a restored pause is a real one, not a label.
+        time.sleep(0.3)
+        assert source.done == []
+
+        restarted.set_paused(False)
+        assert wait_until(lambda: len(source.done) > 0, timeout=15)
+    finally:
+        restarted.stop()
+
+    # And resuming is remembered too, or the next restart would re-pause.
+    assert engine_with(tmp_path, source).paused is False
+
+
 def test_a_from_scratch_rebuild_is_flagged_until_a_pass_completes(tmp_path):
     """A pause part-way through a rebuild must not look like an empty history."""
     engine = engine_with(tmp_path, SlowSource(count=1, delay=0.0))

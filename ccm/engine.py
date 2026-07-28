@@ -58,6 +58,16 @@ class Engine:
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._paused = threading.Event()
+        # Restored, not defaulted: pausing is how you get the disk back, and an
+        # update that silently resumed scanning would hand the machine's IO to a
+        # cold pass at the worst possible moment -- while you are still working.
+        # A pause therefore outlives the process until it is explicitly lifted.
+        if self.store.get_meta("scan_paused") == "1":
+            self._paused.set()
+            self.scanner.progress.paused = True
+            # The phase is left to the worker's first turn round the loop, which
+            # is what broadcasts it; setting it here would make `_enter_paused`
+            # think it had already announced itself.
         # Pause is a read-modify-write over two pieces of state, and the
         # endpoints that drive it run on the threadpool, so two clicks or two
         # tabs really do arrive at once.
@@ -165,6 +175,8 @@ class Engine:
             else:
                 self._paused.clear()
             self.scanner.progress.paused = paused
+            # Recorded so a restart or an upgrade does not quietly resume.
+            self.store.set_meta("scan_paused", "1" if paused else "0")
             # Either way the worker should look again now: to leave the pass, or
             # to start one.
             self._wake.set()
@@ -235,6 +247,10 @@ class Engine:
         progress = self.scanner.progress
         if progress.phase == "paused":
             return
+        # Restated rather than assumed: a pause restored from the store was
+        # recorded against whichever progress object existed at construction,
+        # and the scanner may have been replaced since.
+        progress.paused = True
         progress.phase = "paused"
         progress.current_file = None
         progress.current_source = None
