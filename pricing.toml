@@ -97,15 +97,79 @@ cached_input = 0.075
 output = 4.50
 source = "https://wavespeed.ai/blog/posts/gpt-5-4-mini-pricing/"
 
-# xAI documents that rates shift past 200K but does not publish the long-tier
-# numbers. Every grok request in this corpus is under the threshold, so the
-# absence costs nothing today; the Data Quality panel flags it if that changes.
+# The 5.1-5.3 generations, still present in older sessions. No [long] tables:
+# unlike the 5.6 family, OpenAI lists one rate per model for these.
+[models."gpt-5.2"]
+input = 1.75
+cached_input = 0.175
+output = 14.00
+source = "https://developers.openai.com/api/docs/pricing"
+
+[models."gpt-5.2-codex"]
+inherit = "gpt-5.2"
+source = "https://developers.openai.com/api/docs/pricing"
+
+[models."gpt-5.3-codex"]
+inherit = "gpt-5.2"
+source = "https://developers.openai.com/api/docs/pricing"
+
+[models."gpt-5.1-codex-mini"]
+input = 0.25
+cached_input = 0.025
+output = 2.00
+source = "https://developers.openai.com/api/docs/pricing"
+
+# Research preview: OpenAI's Codex rate card says the credit rates for this model
+# are not final, so there is deliberately no entry for it and its tokens stay in
+# the Data Quality unpriced list. models.dev copies gpt-5.3-codex's rates, which
+# is a guess wearing a number.
+#   [models."gpt-5.3-codex-spark"] -- intentionally absent
+#
+# Likewise codex-auto-review: not a public SKU at all, but an internal alias for
+# Codex's reviewer (openai/codex#19420 says it "doesn't exist in the API"). The
+# underlying model is understood to be gpt-5.4, but pricing an alias at a guessed
+# model's rate would invent spend rather than report it.
+#   [models."codex-auto-review"] -- intentionally absent
+
+# xAI does publish the long tier after all -- the earlier entry here was taken
+# from a blog post that omitted it and put cached reads at 0.50. The vendor table
+# doubles every category at the threshold, and bills *all* tokens at the long
+# rate once a prompt reaches it.
 [models."grok-4.5"]
 input = 2.00
-cached_input = 0.50
+cached_input = 0.30
 output = 6.00
-long_tier_unknown = true
-source = "https://apidog.com/blog/grok-4-5-pricing/"
+long_context_threshold = 200_000
+source = "https://docs.x.ai/docs/models"
+[models."grok-4.5".long]
+input = 4.00
+# 0.60 and not the 1.00 models.dev lists: xAI's own table says 0.60, and 0.60 is
+# what the doubling pattern on every other model of theirs predicts.
+cached_input = 0.60
+output = 12.00
+
+[models."grok-4.20-0309-non-reasoning"]
+input = 1.25
+cached_input = 0.20
+output = 2.50
+long_context_threshold = 200_000
+source = "https://docs.x.ai/docs/models"
+[models."grok-4.20-0309-non-reasoning".long]
+input = 2.50
+cached_input = 0.40
+output = 5.00
+
+# Logged bare; xAI's published id is grok-build-0.1.
+[models."grok-build"]
+input = 1.00
+cached_input = 0.20
+output = 2.00
+long_context_threshold = 200_000
+source = "https://docs.x.ai/docs/models"
+[models."grok-build".long]
+input = 2.00
+cached_input = 0.40
+output = 4.00
 
 [models."grok-composer-2.5-fast"]
 input = 3.00
@@ -182,6 +246,16 @@ source = "https://platform.claude.com/docs/en/about-claude/pricing"
 [models."claude-haiku-4-5-20251001"]
 inherit = "claude-haiku-4-5"
 
+# Earlier generations, reached through the anthropic/ provider prefix. Same rates
+# as their 4.8/4.6 counterparts, so they inherit rather than repeat.
+[models."claude-opus-4-6"]
+inherit = "claude-opus-5"
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+
+[models."claude-sonnet-4-5"]
+inherit = "claude-sonnet-4-6"
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+
 
 # ---------------------------------------------------------------------------
 # MiniMax -- used by the Pi client.
@@ -200,6 +274,23 @@ input = 0.60
 cached_input = 0.12
 output = 2.40
 
+# M2.7 does have a cache-write charge, unlike M3 -- MiniMax's paygo page lists it
+# explicitly. The highspeed lane is the same model at a premium for input and
+# output, with cache unchanged.
+[models."MiniMax-M2.7"]
+input = 0.30
+cached_input = 0.06
+cache_write = 0.375
+output = 1.20
+source = "https://platform.minimax.io/docs/guides/pricing-paygo"
+
+[models."MiniMax-M2.7-highspeed"]
+input = 0.60
+cached_input = 0.06
+cache_write = 0.375
+output = 2.40
+source = "https://platform.minimax.io/docs/guides/pricing-paygo"
+
 
 # ---------------------------------------------------------------------------
 # Z.ai -- reached through the OpenCode client's zai-coding-plan provider.
@@ -211,6 +302,107 @@ input = 1.40
 cached_input = 0.26
 output = 4.40
 source = "https://www.aipricing.guru/models/z-ai-glm-5-2/"
+
+[models."glm-5.1"]
+input = 1.40
+cached_input = 0.26
+output = 4.40
+source = "https://docs.z.ai/guides/overview/pricing"
+
+[models."glm-5"]
+input = 1.00
+cached_input = 0.20
+output = 3.20
+source = "https://docs.z.ai/guides/overview/pricing"
+
+[models."glm-5-turbo"]
+input = 1.20
+cached_input = 0.24
+output = 4.00
+source = "https://docs.z.ai/guides/overview/pricing"
+
+[models."glm-4.7"]
+input = 0.60
+cached_input = 0.11
+output = 2.20
+source = "https://docs.z.ai/guides/overview/pricing"
+
+
+# ---------------------------------------------------------------------------
+# Moonshot (Kimi) -- reached through the kimi-coding and kimi-for-coding
+# providers, which are subscription lanes. Priced at Moonshot's own list rate on
+# the same principle as the Z.ai block above: what the plan covers, valued at
+# what it would have cost metered.
+#
+# The logged names are short forms of the published ids: k2p5 is kimi-k2.5, k2p7
+# is kimi-k2.7-code, k3 is kimi-k3.
+
+[models."k3"]
+input = 3.00
+cached_input = 0.30
+output = 15.00
+source = "https://platform.kimi.ai/docs/pricing/chat-k3"
+
+# A context-capped lane of the same model, not a separate rate card.
+[models."k3-256k"]
+inherit = "k3"
+source = "https://platform.kimi.ai/docs/pricing/chat-k3"
+
+[models."k2p7"]
+input = 0.95
+cached_input = 0.19
+output = 4.00
+source = "https://platform.kimi.ai/docs/pricing/chat-k27-code"
+
+[models."kimi-for-coding"]
+inherit = "k2p7"
+source = "https://models.dev/"
+
+# The highspeed lane doubles input and output; cache reads are unchanged.
+[models."kimi-for-coding-highspeed"]
+input = 1.90
+cached_input = 0.38
+output = 8.00
+source = "https://platform.kimi.ai/docs/pricing/chat-k27-code"
+
+[models."k2p5"]
+input = 0.60
+cached_input = 0.10
+output = 3.00
+source = "https://platform.kimi.ai/docs/pricing/chat-k25"
+
+# Genuinely free while the gateway offers it, like the Zen tier below.
+[models."kimi-k2.5-free"]
+input = 0.0
+cached_input = 0.0
+output = 0.0
+source = "https://models.dev/"
+
+
+# ---------------------------------------------------------------------------
+# Xiaomi MiMo -- reached through the xiaomi-token-plan providers, which buy
+# credits rather than metering. Valued at the overseas pay-as-you-go rate, as
+# with Z.ai and Moonshot above.
+
+[models."mimo-v2.5-pro"]
+input = 0.435
+cached_input = 0.0036
+output = 0.87
+source = "https://mimo.mi.com/docs/price/pay-as-you-go"
+
+[models."mimo-v2.5-pro-ultraspeed"]
+input = 1.305
+cached_input = 0.0108
+output = 2.61
+source = "https://mimo.mi.com/docs/price/pay-as-you-go"
+
+# The V2 series was retired on 2026-06-30 and its historical rate cards
+# contradict each other -- one lists the V2.5 numbers, another a tiered $1/$3.
+# Left unpriced rather than guessed at; the volume here is small.
+#   [models."mimo-v2-pro"] -- intentionally absent
+#
+# gemini-3-pro-preview is likewise absent: the model is shut down, and only
+# last-known rates survive.
 
 
 # ---------------------------------------------------------------------------
