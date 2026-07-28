@@ -24,9 +24,12 @@
   font-display: swap;
   src: url('/fonts/chivo/chivo-latin-wght-normal.woff2') format('woff2');
 }
-/* Carried for its width axis (62-125), which is what makes a long legend of
-   model names fit on one line without shrinking the type. Same foundry as
-   Chivo, so a narrow label next to a Chivo heading still looks deliberate. */
+/* A compact, plain grotesque for label runs: legends of model names sit closer
+   together than Chivo would allow at the same size, without the condensing that
+   made them hard to read. The width axis is declared because the file carries it,
+   not because anything narrows the type -- packing is measured, so a legend that
+   does not fit folds rather than squeezes. Same foundry as Chivo, so a label next
+   to a Chivo heading still looks deliberate. */
 @font-face {
   font-family: 'Archivo';
   font-style: normal;
@@ -90,9 +93,10 @@
   /* type */
   --font-hierarchy: 'Chivo', system-ui, sans-serif;
   --font-prose: 'Atkinson Hyperlegible', system-ui, sans-serif;
-  /* For label runs too long for their box: a legend of ten model names, not
-     numbers. Never for figures -- those stay mono so columns line up. */
-  --font-narrow: 'Archivo', system-ui, sans-serif;
+  /* For runs of labels: a legend of ten model names, not numbers. Compact enough
+     to fit more of them per line than Chivo would, at full width -- nothing is
+     condensed. Never for figures: those stay mono so columns line up. */
+  --font-label: 'Archivo', system-ui, sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --sans: var(--font-hierarchy);
   --type-section: 600 .8125rem / 1.25rem var(--font-hierarchy);
@@ -812,7 +816,7 @@ input.inline-name:hover { border-color: var(--border); }
   position: relative;
   padding-block-end: var(--space-2);
   font: var(--type-data);
-  font-family: var(--font-narrow);
+  font-family: var(--font-label);
 }
 
 .legend-row {
@@ -823,8 +827,10 @@ input.inline-name:hover { border-color: var(--border); }
   /* Two item heights plus the row gap, where an item is its line box plus its
      1px of padding either side. Fixed rather than min, so a legend that wants a
      third row is held to the deal it was given -- and exact, or the second row
-     is clipped by the couple of pixels the padding adds. */
-  height: calc(2 * (1.125rem + 2px) + 2px);
+     is clipped by the couple of pixels the padding adds. The last 1px is the
+     chip's dotted underline, which makes it a pixel taller than an item and was
+     enough on its own to clip whichever row it landed on. */
+  height: calc(2 * (1.125rem + 2px) + 2px + 1px);
   overflow: hidden;
 }
 
@@ -844,12 +850,23 @@ input.inline-name:hover { border-color: var(--border); }
   border: 0;
   border-block-end: var(--rule) dotted var(--border-strong);
   background: none;
-  padding: 1px 0;
+  /* Wider than the text needs: this is the only way into the series picker when
+     nothing has overflowed, and a bare glyph is a ~10px target. */
+  padding: 1px var(--space-1);
+  gap: var(--space-1);
   font: inherit;
   line-height: 1.125rem;
   white-space: nowrap;
 }
 .legend-more:hover { color: var(--text-primary); }
+
+/* Series switched off by hand. Folding and hiding are different things and look
+   the same from outside the chart, so the count says which this is. */
+.legend-off {
+  color: var(--warning);
+  font-family: var(--mono);
+  font-size: .9em;
+}
 
 .legend-item {
   display: inline-flex;
