@@ -48,6 +48,23 @@ export function DensityPlot({ grid, palette, thresholdTokens, height = 240 }: Pr
 
   return (
     <div>
+      {/* Above the plot and the same height as a legend, so this lines up with
+          the charts beside it. */}
+      <div className="chart-scale">
+        <div className="scale">
+          <span>1 request</span>
+          <span className="ramp">
+            {palette.seq.map((hex, i) => (
+              <i key={i} style={{ background: hex }} />
+            ))}
+          </span>
+          <span>{integer(maxN)}</span>
+          <span style={{ marginLeft: 8 }}>
+            y: cache rate · x: prompt tokens (log) · {integer(grid.count)} requests
+          </span>
+        </div>
+      </div>
+
       <div style={{ display: 'flex', gap: 6 }}>
         <div
           style={{
@@ -166,18 +183,6 @@ export function DensityPlot({ grid, palette, thresholdTokens, height = 240 }: Pr
         </div>
       </div>
 
-      <div className="scale" style={{ marginTop: 4 }}>
-        <span>1 request</span>
-        <span className="ramp">
-          {palette.seq.map((hex, i) => (
-            <i key={i} style={{ background: hex }} />
-          ))}
-        </span>
-        <span>{integer(maxN)}</span>
-        <span style={{ marginLeft: 8 }}>
-          y: cache rate · x: prompt tokens (log) · {integer(grid.count)} requests
-        </span>
-      </div>
     </div>
   )
 }

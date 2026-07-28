@@ -87,6 +87,13 @@
   --space-12: 48px;
   --rule: 1px;
   --radius: 3px;
+  /* The height every chart spends on its key, whether that key is a legend of
+     names or a colour ramp. Two item heights plus the row gap, where an item is
+     its line box plus 1px of padding either side, plus 1px for the chip's dotted
+     underline -- which is a pixel taller than an item and was enough on its own
+     to clip whichever row it landed on. Shared, because the whole point is that
+     two charts side by side start their plots at the same y. */
+  --legend-h: calc(2 * (1.125rem + 2px) + 2px + 1px);
   --measure-full: 1728px;
   --measure-prose: 76ch;
 
@@ -332,6 +339,44 @@ button, input, select { font: inherit; color: inherit; }
 }
 
 .panel-head > :first-child { margin-inline-end: auto; }
+
+/* A chart's heading reserves two lines, and is held to two.
+ *
+ * The key below it is a fixed height so that plots on the same row start at the
+ * same y -- but that only works if everything above the plot is the same height
+ * too. A quarter-width panel whose note wraps to two lines otherwise pushes its
+ * plot a line lower than the panel beside it, which made the key the constant and
+ * the heading the variable. Scoped with :has to charts, since a table panel has
+ * no plot to align and the extra line would just be slack.
+ *
+ * Fixed and not min-height: "at least two lines" still lets a two-line note come
+ * out a couple of pixels taller than a one-line one, and a couple of pixels is
+ * all it takes to see. The note is clamped to two lines below, so nothing needs
+ * to overflow this. */
+.panel:has(.legend-block, .chart-scale) .panel-head {
+  height: calc(2 * 1.25rem + var(--space-2) + var(--rule));
+  overflow: hidden;
+}
+.panel:has(.legend-block, .chart-scale) .panel-note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* The ramp charts' equivalent of a legend: same box, same height, same place --
+   above the plot. They used to hang their ramp underneath, which is why a
+   calendar beside a line chart could never line up. */
+.chart-scale {
+  display: flex;
+  align-items: center;
+  /* The gap is added to the height, not taken out of it: box-sizing is border-box
+     here, so a bare `height: var(--legend-h)` would have swallowed the padding and
+     left this key 8px shorter than a legend -- which is exactly the misalignment
+     this is meant to remove. A legend-block is legend-row plus that same gap. */
+  height: calc(var(--legend-h) + var(--space-2));
+  padding-block-end: var(--space-2);
+}
 
 /* A note and a control sharing the right-hand end of a heading. */
 .panel-head-tail {
@@ -824,13 +869,7 @@ input.inline-name:hover { border-color: var(--border); }
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 2px var(--space-3);
-  /* Two item heights plus the row gap, where an item is its line box plus its
-     1px of padding either side. Fixed rather than min, so a legend that wants a
-     third row is held to the deal it was given -- and exact, or the second row
-     is clipped by the couple of pixels the padding adds. The last 1px is the
-     chip's dotted underline, which makes it a pixel taller than an item and was
-     enough on its own to clip whichever row it landed on. */
-  height: calc(2 * (1.125rem + 2px) + 2px + 1px);
+  height: var(--legend-h);
   overflow: hidden;
 }
 

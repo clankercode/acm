@@ -122,8 +122,11 @@ source = "https://developers.openai.com/api/docs/pricing"
 # Research preview: OpenAI's Codex rate card says the credit rates for this model
 # are not final, so there is deliberately no entry for it and its tokens stay in
 # the Data Quality unpriced list. models.dev copies gpt-5.3-codex's rates, which
-# is a guess wearing a number.
-#   [models."gpt-5.3-codex-spark"] -- intentionally absent
+# is a guess wearing a number. This is the largest unpriced model in a typical
+# Codex corpus, so the gap is deliberate and worth knowing about: to close it,
+# uncomment and set whatever rate you are actually charged.
+#   [models."gpt-5.3-codex-spark"]
+#   inherit = "gpt-5.2"    # 1.75 / 0.175 / 14, what models.dev assumes
 #
 # Likewise codex-auto-review: not a public SKU at all, but an internal alias for
 # Codex's reviewer (openai/codex#19420 says it "doesn't exist in the API"). The
@@ -158,6 +161,13 @@ source = "https://docs.x.ai/docs/models"
 input = 2.50
 cached_input = 0.40
 output = 5.00
+
+# Not a published model id -- the name appears only in logs -- but it is Grok 4.5
+# under xAI's Build product, so it bills as grok-4.5. Confirmed by the operator of
+# the account these sessions come from, which is a better source than the three
+# candidate rate cards a search turns up.
+[models."grok-4.5-build"]
+inherit = "grok-4.5"
 
 # Logged bare; xAI's published id is grok-build-0.1.
 [models."grok-build"]

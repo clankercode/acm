@@ -134,6 +134,31 @@ export function Calendar({ days, palette, metric }: Props) {
 
   return (
     <div>
+      {/* Above the grid and the same height as a legend, so a calendar lines up
+          with whatever chart shares its row. */}
+      <div className="chart-scale">
+        <div className="scale">
+          {/* Volumes are measured from zero; a rate is measured across the band
+              it actually occupies, so the low end has to say which. */}
+          <span>{metric === 'cache_rate' ? pct(grid.min, 1) : 'none'}</span>
+          <span className="ramp">
+            {palette.seq.map((hex, i) => (
+              <i key={i} style={{ background: hex }} />
+            ))}
+          </span>
+          <span>
+            {metric === 'cost'
+              ? usd(grid.max)
+              : metric === 'cache_rate'
+                ? pct(grid.max, 1)
+                : compact(grid.max)}
+          </span>
+          <span style={{ marginLeft: 6 }}>{LABELS[metric]} per day</span>
+          <span className="cal-cell quiet" style={{ marginLeft: 10 }} />
+          <span>no traffic</span>
+        </div>
+      </div>
+
       <div className="cal-head">
         <div className="seg" role="group" aria-label="Month">
           <button
@@ -226,26 +251,6 @@ export function Calendar({ days, palette, metric }: Props) {
         )}
       </div>
 
-      <div className="scale" style={{ marginTop: 8 }}>
-        {/* Volumes are measured from zero; a rate is measured across the band
-            it actually occupies, so the low end has to say which. */}
-        <span>{metric === 'cache_rate' ? pct(grid.min, 1) : 'none'}</span>
-        <span className="ramp">
-          {palette.seq.map((hex, i) => (
-            <i key={i} style={{ background: hex }} />
-          ))}
-        </span>
-        <span>
-          {metric === 'cost'
-            ? usd(grid.max)
-            : metric === 'cache_rate'
-              ? pct(grid.max, 1)
-              : compact(grid.max)}
-        </span>
-        <span style={{ marginLeft: 6 }}>{LABELS[metric]} per day</span>
-        <span className="cal-cell quiet" style={{ marginLeft: 10 }} />
-        <span>no traffic</span>
-      </div>
     </div>
   )
 }

@@ -47,6 +47,30 @@ export function Heatmap({ cells, palette, metric }: Props) {
 
   return (
     <div>
+      {/* Above the plot and the same height as a legend, so this chart starts its
+          grid at the same y as a line chart beside it. */}
+      <div className="chart-scale">
+        <div className="scale">
+          <span>{metric === 'cache_rate' ? 'best cache' : 'cheapest'}</span>
+          <span className="ramp">
+            {palette.seq.map((hex, i) => (
+              <i key={i} style={{ background: hex }} />
+            ))}
+          </span>
+          <span>{metric === 'cache_rate' ? 'worst cache' : 'dearest'}</span>
+          <span style={{ marginLeft: 6 }}>
+            {metric === 'cache_rate'
+              ? `(${pct(min, 0)} – ${pct(max, 0)})`
+              : `(${rate(min)} – ${rate(max)})`}
+          </span>
+          <span
+            className="heat-cell empty"
+            style={{ width: 10, minHeight: 10, marginLeft: 10 }}
+          />
+          <span>no traffic</span>
+        </div>
+      </div>
+
       <div style={{ display: 'flex', gap: 6, position: 'relative' }}>
         <div
           style={{
@@ -132,25 +156,6 @@ export function Heatmap({ cells, palette, metric }: Props) {
         )}
       </div>
 
-      <div className="scale" style={{ marginTop: 8 }}>
-        <span>{metric === 'cache_rate' ? 'best cache' : 'cheapest'}</span>
-        <span className="ramp">
-          {palette.seq.map((hex, i) => (
-            <i key={i} style={{ background: hex }} />
-          ))}
-        </span>
-        <span>{metric === 'cache_rate' ? 'worst cache' : 'dearest'}</span>
-        <span style={{ marginLeft: 6 }}>
-          {metric === 'cache_rate'
-            ? `(${pct(min, 0)} – ${pct(max, 0)})`
-            : `(${rate(min)} – ${rate(max)})`}
-        </span>
-        <span
-          className="heat-cell empty"
-          style={{ width: 10, minHeight: 10, marginLeft: 10 }}
-        />
-        <span>no traffic</span>
-      </div>
     </div>
   )
 }
