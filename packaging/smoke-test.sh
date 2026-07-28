@@ -22,6 +22,11 @@ ccm="$root/venv/bin/ccm"
 # and the scan finds nothing -- what is under test is that the program runs.
 export HOME="$root/home"
 mkdir -p "$HOME"
+# Overriding HOME is not enough: an XDG_*_HOME inherited from the caller wins over
+# it, so state and cache would land in the real user's directories and the checks
+# below would look for them in the throwaway one and not find them. Some terminals
+# and agent harnesses set these.
+unset XDG_STATE_HOME XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME
 
 echo "== ccm scan"
 "$ccm" scan -q

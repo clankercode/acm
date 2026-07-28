@@ -50,8 +50,13 @@ verify-wheel: build
     #!/usr/bin/env bash
     set -euo pipefail
     wheel=$(ls dist/*.whl)
+    # Listed once into a variable rather than piped per member: `grep -q` exits at
+    # the first match and closes the pipe under it, so `unzip` takes a SIGPIPE and
+    # `pipefail` reports the member missing -- a race that failed on whichever
+    # member happened to lose it.
+    listing=$(unzip -l "$wheel")
     for member in ccm/_web/index.html ccm/pricing.default.toml ccm/server.py; do
-        unzip -l "$wheel" | grep -q " $member\$" || { echo "wheel is missing $member"; exit 1; }
+        grep -q " $member\$" <<<"$listing" || { echo "wheel is missing $member"; exit 1; }
     done
     packaging/smoke-test.sh "$wheel"
 
