@@ -115,7 +115,7 @@ function toSeries(
 }
 
 export default function App() {
-  const { state, scan, connected } = useLiveState()
+  const { state, scan, connected, newBuild } = useLiveState()
   const [theme, setTheme, themeEpoch] = useTheme()
   const [range, setRange] = useState<RangeKey>('7d')
   const [bucket, setBucket] = useState('hour')
@@ -904,7 +904,10 @@ export default function App() {
             </span>
           </div>
           <div className="panel-body">
-            <Machines generation={generation} onChanged={() => api.rescan(false)} />
+{/* A nudge, not the recompute itself: both endpoints already refresh the
+                derived state server-side before they answer, so a refusal while
+                scanning is paused costs nothing. */}
+            <Machines generation={generation} onChanged={() => nudgeScan()} />
           </div>
         </section>
 
@@ -916,7 +919,10 @@ export default function App() {
             </span>
           </div>
           <div className="panel-body">
-            <PricingEditor pricing={pricing.data} onSaved={() => api.rescan(false)} />
+{/* A nudge, not the recompute itself: both endpoints already refresh the
+                derived state server-side before they answer, so a refusal while
+                scanning is paused costs nothing. */}
+            <PricingEditor pricing={pricing.data} onSaved={() => nudgeScan()} />
           </div>
         </section>
 
@@ -947,8 +953,63 @@ export default function App() {
           </div>
         </section>
       </main>
+
+      <UpdatePrompt build={newBuild} version={state?.build?.version} />
     </div>
   )
+}
+
+/**
+ * "The server was upgraded -- reload."
+ *
+ * Left to the operator rather than reloading automatically: a tab that reloads
+ * itself throws away whatever was on screen, and an upgrade lands the moment
+ * `just update` restarts the unit, which is exactly when someone may be reading
+ * a chart.
+ *
+ * Dismissible for the same reason, and keyed on the build that prompted it, so
+ * dismissing this upgrade does not also silence the next one -- a tab left open
+ * for a week would otherwise go quiet after the first "Later".
+ */
+function UpdatePrompt({ build, version }: { build: string | null; version?: string }) {
+  const [dismissed, setDismissed] = useState<string | null>(null)
+  const showing = build !== null && dismissed !== build
+  // The live region is mounted whether or not it has anything to say: a region
+  // that appears at the same moment as its text is frequently not announced,
+  // because there was nothing there to observe a change to.
+  return (
+    <div role="status" aria-live="polite">
+      {showing && (
+        <div className="updatebar">
+          <span>
+            <strong>Update installed</strong>
+            {version ? ` · version ${version}` : ''} — this page is running the old
+            build.
+          </span>
+          <button
+            className="btn primary"
+            type="button"
+            onClick={() => location.reload()}
+          >
+            Reload
+          </button>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => setDismissed(build)}
+            title="Keep the old build for now"
+          >
+            Later
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Ask for a scan pass, tolerating the refusal a paused server answers with. */
+function nudgeScan() {
+  void api.rescan(false).catch(() => {})
 }
 
 function bucketLabel(seconds: number): string {

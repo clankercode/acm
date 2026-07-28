@@ -334,12 +334,57 @@ def test_rescan_rebuilds_from_scratch(client):
     assert restored["cost"] == pytest.approx(before["cost"])
 
 
+def test_pausing_holds_new_sessions_back_until_resumed(client, day_dir, clock):
+    """A paused server must ignore the corpus, and lose nothing by doing so."""
+    assert client.post("/api/scan/pause").json() == {"paused": True}
+    assert client.get("/api/state").json()["scan"]["paused"] is True
+    # The worker settles into the paused phase rather than looking busy forever.
+    assert wait_for(
+        lambda: client.get("/api/state").json()["scan"]["phase"] == "paused"
+    ), "the scan loop did not come to rest"
+
+    seed(day_dir, clock, rollout_id="b")
+    client.post("/api/rescan")  # refused, so this cannot be what unblocks it
+    # Several poll intervals: if the loop were still running, this is where it
+    # would pick the new rollout up.
+    time.sleep(settings_poll(client) * 5)
+    assert client.get("/api/totals").json()["requests"] == 2
+
+    assert client.post("/api/scan/resume").json() == {"paused": False}
+    assert wait_for(lambda: client.get("/api/totals").json()["requests"] == 4)
+    assert client.get("/api/state").json()["scan"]["paused"] is False
+
+
+def settings_poll(client) -> float:
+    return client.app.state.engine.settings.poll_seconds
+
+
+def test_rescan_is_refused_while_paused(client):
+    """Dropping the derived tables with no worker to rebuild them would empty
+    the dashboard, so a full rescan is rejected rather than queued."""
+    client.post("/api/scan/pause").raise_for_status()
+    try:
+        assert client.post("/api/rescan?full=true").status_code == 409
+        assert client.get("/api/totals").json()["requests"] == 2
+    finally:
+        client.post("/api/scan/resume").raise_for_status()
+
+
+def test_state_names_the_build_it_was_served_by(client):
+    """The dashboard compares this across reconnects to spot an upgrade."""
+    build = client.get("/api/state").json()["build"]
+    assert build["version"]
+    assert len(build["id"]) == 16
+    # Stable within a process: a changed id has to mean changed code.
+    assert client.get("/api/state").json()["build"] == build
+
+
 def test_ui_placeholder_when_not_built(client):
     response = client.get("/")
     # Either the built UI is served, or a clear instruction to build it.
     assert response.status_code in (200, 503)
     if response.status_code == 503:
-        assert "pnpm build" in response.text
+        assert "just build-web" in response.text
 
 
 def event_reader(response):
