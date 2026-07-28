@@ -4,12 +4,12 @@ import type { ColorScale } from '../lib/palette'
 import type { BreakdownRow } from '../lib/types'
 
 /** Rows shown before a table starts scrolling instead of growing the page. */
-const DEFAULT_ROWS = 24
+const DEFAULT_ROWS = 15
 
 /**
  * Extra rows a table may exceed the cap by and still be drawn whole.
  *
- * Clipping 26 rows down to 24 trades two rows of page height for a scrollbar
+ * Clipping 17 rows down to 15 trades two rows of page height for a scrollbar
  * and a handle, which is a worse deal than just showing them.
  */
 const CLIP_SLACK = 4

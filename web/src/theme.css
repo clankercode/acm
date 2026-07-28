@@ -24,6 +24,17 @@
   font-display: swap;
   src: url('/fonts/chivo/chivo-latin-wght-normal.woff2') format('woff2');
 }
+/* Carried for its width axis (62-125), which is what makes a long legend of
+   model names fit on one line without shrinking the type. Same foundry as
+   Chivo, so a narrow label next to a Chivo heading still looks deliberate. */
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-display: swap;
+  src: url('/fonts/archivo/archivo-latin-standard-normal.woff2') format('woff2');
+}
 @font-face {
   font-family: 'Atkinson Hyperlegible';
   font-style: normal;
@@ -79,6 +90,9 @@
   /* type */
   --font-hierarchy: 'Chivo', system-ui, sans-serif;
   --font-prose: 'Atkinson Hyperlegible', system-ui, sans-serif;
+  /* For label runs too long for their box: a legend of ten model names, not
+     numbers. Never for figures -- those stay mono so columns line up. */
+  --font-narrow: 'Archivo', system-ui, sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --sans: var(--font-hierarchy);
   --type-section: 600 .8125rem / 1.25rem var(--font-hierarchy);
@@ -112,6 +126,13 @@
   --series-4: #eda100;
   --series-5: #e87ba4;
   --series-6: #008300;
+  /* Second tier. Honestly less separable than the six above -- purple against
+     blue, brown against orange -- but a tenth hue beats a tenth series folded
+     into the grey, which is how real spend went missing. */
+  --series-7: #7a4fce;
+  --series-8: #0e93b0;
+  --series-9: #8f5b30;
+  --series-10: #6f7d1d;
   --series-other: #8b8880;
 
   --good: #0f786d;
@@ -159,6 +180,10 @@
     --series-4: #c98500;
     --series-5: #d55181;
     --series-6: #008300;
+    --series-7: #a184f2;
+    --series-8: #2fb3cf;
+    --series-9: #b8834f;
+    --series-10: #9aab33;
     --series-other: #77848f;
 
     --good: #55c6b9;
@@ -199,6 +224,10 @@
   --series-4: #c98500;
   --series-5: #d55181;
   --series-6: #008300;
+  --series-7: #a184f2;
+  --series-8: #2fb3cf;
+  --series-9: #b8834f;
+  --series-10: #9aab33;
   --series-other: #77848f;
 
   --good: #55c6b9;
@@ -708,12 +737,18 @@ input.inline-name:hover { border-color: var(--border); }
 .u-title, .u-legend { display: none; }
 .u-select { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 
+/* Names, not figures, and there can be ten of them: narrow and condensed so a
+   full legend fits above the plot instead of pushing a second and third line
+   between the title and the chart. The values keep the mono face below. */
 .legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px var(--space-4);
+  gap: 2px var(--space-3);
   padding-block-end: var(--space-2);
   font: var(--type-data);
+  font-family: var(--font-narrow);
+  font-stretch: 80%;
+  letter-spacing: .01em;
 }
 
 .legend-item {
@@ -728,7 +763,13 @@ input.inline-name:hover { border-color: var(--border); }
   font: inherit;
 }
 .legend-item[aria-pressed='false'] { opacity: .35; }
-.legend-item .val { color: var(--text-muted); }
+/* Back to mono: these are numbers, and they sit under each other as the legend
+   wraps. */
+.legend-item .val {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-stretch: normal;
+}
 
 .tooltip {
   position: absolute;

@@ -1,17 +1,21 @@
 /**
  * Colour assignment.
  *
- * Slots come from a validated categorical palette (six hues, checked for CVD
- * separation and surface contrast in both themes). Two rules matter:
+ * Slots come from a validated categorical palette. The first six hues are the
+ * strongly separated set (checked for CVD separation and surface contrast in
+ * both themes); four more follow as a second tier, less distinct from each
+ * other but preferable to the alternative, which was a busy month's seventh
+ * model vanishing into a grey band nobody can read a number off. Two rules
+ * matter:
  *
- * 1. Hues are assigned in fixed order and never cycled. A seventh series folds
- *    into "Other" rather than reusing a hue.
+ * 1. Hues are assigned in fixed order and never cycled. An eleventh series
+ *    folds into "Other" rather than reusing a hue.
  * 2. Colour follows the entity, not its current rank. The ordering comes from
  *    the unfiltered global model list, so narrowing a filter never repaints the
  *    series that survive it.
  */
 
-export const SLOT_COUNT = 6
+export const SLOT_COUNT = 10
 
 const SLOT_VARS = Array.from({ length: SLOT_COUNT }, (_, i) => `--series-${i + 1}`)
 const OTHER_VAR = '--series-other'
@@ -59,17 +63,35 @@ export function readPalette(): Palette {
 }
 
 /**
- * Fixed key -> slot map built from the global ordering.
+ * Key -> slot map built from the global ordering.
  * Keys past the last slot share the muted "other" colour, matching the server's
  * own folding of the long tail into an `other` group.
+ *
+ * `drawn` is the set of keys a chart actually plots, and it matters: the global
+ * ordering is all-time, so a model that is fourth this week can be thirtieth
+ * overall and would draw in the tail grey -- next to three other models in the
+ * same grey, and next to "Other" in the same grey again. Passing the drawn keys
+ * allocates the slots among them, in global order, so the ten lines on a chart
+ * get the ten hues. The cost is that changing a filter can repaint a series;
+ * without it, the alternative was four series no one can tell apart.
  */
 export class ColorScale {
   private index = new Map<string, number>()
 
-  constructor(orderedKeys: string[], private palette: Palette) {
-    orderedKeys.forEach((key, i) => {
-      if (!this.index.has(key)) this.index.set(key, i)
+  constructor(orderedKeys: string[], private palette: Palette, drawn?: Iterable<string>) {
+    const only = drawn == null ? null : new Set(drawn)
+    let slot = 0
+    orderedKeys.forEach((key) => {
+      if (this.index.has(key)) return
+      if (only && !only.has(key)) return
+      this.index.set(key, slot++)
     })
+    // Anything drawn but absent from the global ordering still needs a hue: the
+    // orderings are fetched separately, so a brand new model can reach a chart
+    // one poll before it reaches the dimension list.
+    if (only) {
+      for (const key of only) if (!this.index.has(key)) this.index.set(key, slot++)
+    }
   }
 
   get(key: string): string {

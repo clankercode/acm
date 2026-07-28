@@ -140,20 +140,6 @@ export default function App() {
   const palette = useMemo(() => readPalette(), [themeEpoch])
   const generation = state?.generation ?? 0
 
-  // Colour is keyed to the global model ordering, so filtering never repaints
-  // the series that survive.
-  const colors = useMemo(
-    () => new ColorScale(state?.dimensions.models ?? [], palette),
-    [state?.dimensions.models, palette],
-  )
-  const repoColors = useMemo(
-    () => new ColorScale(state?.dimensions.repos ?? [], palette),
-    [state?.dimensions.repos, palette],
-  )
-  const sourceColors = useMemo(
-    () => new ColorScale(state?.dimensions.sources ?? [], palette),
-    [state?.dimensions.sources, palette],
-  )
   const multiClient = (state?.dimensions.sources?.length ?? 0) > 1
 
   const lastTs = state?.dimensions.last_ts ?? null
@@ -223,6 +209,33 @@ export default function App() {
   )
   const scatter = useQuery((s) => api.scatter(active, 36, s), [key, generation])
   const pricing = useQuery((s) => api.pricing(s), [generation, themeEpoch])
+
+  // Colour follows the entity in the global ordering, not its rank in the
+  // current window, so narrowing a filter leaves the surviving series where they
+  // were -- but the hues are allocated among the keys actually plotted, or the
+  // ten lines of a busy week land in the tail grey together. Built here rather
+  // than beside the other memos because it needs the series data.
+  const drawnModels = useMemo(
+    () => (byModel.data?.groups ?? []).map((g) => g.key).filter((k) => k !== 'other'),
+    [byModel.data],
+  )
+  const colors = useMemo(
+    () => new ColorScale(state?.dimensions.models ?? [], palette, drawnModels),
+    [state?.dimensions.models, palette, drawnModels],
+  )
+  const drawnRepos = useMemo(
+    () => (byRepo.data?.groups ?? []).map((g) => g.key).filter((k) => k !== 'other'),
+    [byRepo.data],
+  )
+  const repoColors = useMemo(
+    () => new ColorScale(state?.dimensions.repos ?? [], palette, drawnRepos),
+    [state?.dimensions.repos, palette, drawnRepos],
+  )
+  // Clients are few enough to fit the slots outright, so the global order stands.
+  const sourceColors = useMemo(
+    () => new ColorScale(state?.dimensions.sources ?? [], palette),
+    [state?.dimensions.sources, palette],
+  )
 
   const t = byModel.data?.t ?? overall.data?.t ?? []
   const bucketSeconds = byModel.data?.bucket_seconds ?? 3600
