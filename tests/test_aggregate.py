@@ -468,15 +468,18 @@ def test_series_surcharge_sums_to_the_scalar_one(store, sessions_dir, pricing, c
     assert sum(v or 0 for v in total["long_input"]) == scalar["long_tokens"]
 
 
-def test_context_scatter_bins_every_request(store, sessions_dir, pricing, clock):
+def test_context_scatter_returns_points_for_all_buckets(store, sessions_dir, pricing, clock):
     t = Thread(session_id="s", rollout_id="sc", clock=clock)
     t.meta().turn_context("gpt-5.6-sol")
     for size in (100, 1_000, 10_000, 100_000):
         t.request(size, size // 3, 10)
     ingest(store, sessions_dir, pricing, [t])
-    grid = A.context_scatter(store, pricing, A.Filters(), bins=10)
-    assert grid["count"] == 4
-    assert sum(b["n"] for b in grid["bins"]) == 4
+    data = A.context_scatter(store, pricing, A.Filters())
+    # Count is total requests across all bucket-points.
+    assert data["count"] == 4
+    assert sum(p["n"] for p in data["points"]) == 4
+    # Every point carries the metrics the client can bin on.
+    assert all("cache_rate" in p and "effective_rate" in p for p in data["points"])
 
 
 def test_quota_series_tracks_plan_usage(store, sessions_dir, pricing, clock):

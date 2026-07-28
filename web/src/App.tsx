@@ -7,13 +7,17 @@ import {
   EMPTY_FILTERS,
   sourceLabel,
   type Filters,
+  type HeatCell,
+  type ScatterPoint,
   type SeriesResponse,
 } from './lib/types'
 import { BreakdownTable } from './components/BreakdownTable'
 import { Calendar, type CalendarMetric } from './components/Calendar'
 import { DataQuality } from './components/DataQuality'
 import { DensityPlot } from './components/DensityPlot'
+import type { DensityMetric } from './components/DensityPlot'
 import { Heatmap } from './components/Heatmap'
+import type { HeatmapMetric } from './components/Heatmap'
 import { KpiStrip } from './components/KpiStrip'
 import { Machines } from './components/Machines'
 import { PricingEditor } from './components/PricingEditor'
@@ -110,6 +114,89 @@ const CALENDAR_LABELS: Record<CalendarMetric, string> = {
   output_tokens: 'output tokens',
 }
 
+/**
+ * Every metric the heatmap series can colour by. One API call feeds all of
+ * them: each cell carries full Totals, so the panel just picks a field.
+ */
+const HEAT_METRICS: HeatmapMetric[] = [
+  {
+    key: 'cache_rate',
+    label: 'Cache rate',
+    extract: (c: HeatCell) => c.cache_rate,
+    format: (v) => pct(v, 0),
+    scale: 'rate',
+    invert: true,
+    lowLabel: 'best cache',
+    highLabel: 'worst cache',
+  },
+  {
+    key: 'effective_rate',
+    label: 'Effective rate',
+    extract: (c: HeatCell) => c.effective_rate,
+    format: (v) => rate(v),
+    scale: 'rate',
+    lowLabel: 'cheapest',
+    highLabel: 'dearest',
+  },
+  {
+    key: 'spend',
+    label: 'Spend',
+    extract: (c: HeatCell) => c.cost,
+    format: (v) => usd(v),
+    scale: 'volume',
+    lowLabel: 'none',
+    highLabel: 'max',
+  },
+  {
+    key: 'requests',
+    label: 'Requests',
+    extract: (c: HeatCell) => c.requests,
+    format: (v) => compact(v, 0),
+    scale: 'volume',
+    lowLabel: 'none',
+    highLabel: 'max',
+  },
+]
+
+/**
+ * Every metric the density plot series can put on the y-axis. One API call
+ * feeds all: the server returns weighted points, and binning is client-side.
+ */
+const DENSITY_METRICS: DensityMetric[] = [
+  {
+    key: 'cache_rate',
+    label: 'Cache rate',
+    extract: (p: ScatterPoint) => p.cache_rate,
+    format: (v) => pct(v, 0),
+    scale: 'rate',
+    axisLabel: 'cache rate',
+  },
+  {
+    key: 'effective_rate',
+    label: 'Effective rate',
+    extract: (p: ScatterPoint) => p.effective_rate,
+    format: (v) => rate(v),
+    scale: 'volume',
+    axisLabel: '$/Mtok in',
+  },
+  {
+    key: 'spend',
+    label: 'Spend',
+    extract: (p: ScatterPoint) => p.cost,
+    format: (v) => usd(v),
+    scale: 'volume',
+    axisLabel: 'USD per bucket',
+  },
+  {
+    key: 'output_tokens',
+    label: 'Output tokens',
+    extract: (p: ScatterPoint) => p.output_tokens,
+    format: (v) => compact(v),
+    scale: 'volume',
+    axisLabel: 'output tokens per bucket',
+  },
+]
+
 function toSeries(
   data: SeriesResponse | null,
   colors: ColorScale,
@@ -134,7 +221,6 @@ export default function App() {
   const [range, setRange] = useState<RangeKey>('7d')
   const [bucket, setBucket] = useState('hour')
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
-  const [heatMetric, setHeatMetric] = useState<'cache_rate' | 'effective_rate'>('cache_rate')
   const [calMetric, setCalMetric] = useState<CalendarMetric>('input_tokens')
 
   const palette = useMemo(() => readPalette(), [themeEpoch])
@@ -207,7 +293,7 @@ export default function App() {
     (s) => api.calendar({ ...active, start: null, end: null }, -new Date().getTimezoneOffset(), s),
     [filterKey({ ...filters, start: null, end: null }), generation],
   )
-  const scatter = useQuery((s) => api.scatter(active, 36, s), [key, generation])
+  const scatter = useQuery((s) => api.scatter(active, s), [key, generation])
   const pricing = useQuery((s) => api.pricing(s), [generation, themeEpoch])
 
   // Colour follows the entity in the global ordering, not its rank in the
@@ -947,58 +1033,67 @@ export default function App() {
           </div>
         </section>
 
+        {/*
+          Heatmap series: one panel per metric, all fed by a single API call.
+          The weekday × hour-of-day grid is the shape you actually recognise
+          for "when do I code" — and showing it for several metrics at once
+          reveals patterns no single one does (e.g. cheap hours ≠ cached hours).
+        */}
         <div className="grid two">
-          <section className="panel">
-            <div className="panel-head">
-              <h2 className="panel-title">
-                {heatMetric === 'cache_rate' ? 'Cache rate' : 'Effective rate'} by hour and
-                weekday
-              </h2>
-              <div className="seg" role="group" aria-label="Heatmap metric">
-                <button
-                  type="button"
-                  aria-pressed={heatMetric === 'cache_rate'}
-                  onClick={() => setHeatMetric('cache_rate')}
-                >
-                  Cache
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={heatMetric === 'effective_rate'}
-                  onClick={() => setHeatMetric('effective_rate')}
-                >
-                  $/Mtok
-                </button>
+          {HEAT_METRICS.map((m) => (
+            <section className="panel" key={m.key}>
+              <div className="panel-head">
+                <h2 className="panel-title">{m.label} by hour and weekday</h2>
               </div>
-            </div>
-            <div className="panel-body">
-              <Heatmap
-                cells={heat.data?.cells ?? []}
-                palette={palette}
-                metric={heatMetric}
-              />
-            </div>
-          </section>
-
-          <section className="panel">
-            <div className="panel-head">
-              <h2 className="panel-title">Cache rate against prompt size</h2>
-              <span className="panel-note">
-                where caching falls off as context grows
-              </span>
-            </div>
-            <div className="panel-body">
-              {scatter.data ? (
-                <DensityPlot
-                  grid={scatter.data}
+              <div className="panel-body">
+                <Heatmap
+                  cells={heat.data?.cells ?? []}
                   palette={palette}
-                  thresholdTokens={defaultThreshold}
+                  metric={m}
                 />
-              ) : (
-                <div className="empty">Loading…</div>
-              )}
-            </div>
-          </section>
+              </div>
+            </section>
+          ))}
+        </div>
+
+        {/*
+          Density plot series: one panel per y-metric, all fed by a single
+          scatter call. Each shows how a different quantity is distributed
+          across prompt sizes — cache rate falls off at the long-context
+          threshold, spend concentrates where the requests are, etc.
+        */}
+        <div className="grid two">
+          {DENSITY_METRICS.map((m) => (
+            <section className="panel" key={m.key}>
+              <div className="panel-head">
+                <h2 className="panel-title">
+                  {m.label} against prompt size
+                </h2>
+                <span className="panel-note">
+                  {m.key === 'cache_rate'
+                    ? 'where caching falls off as context grows'
+                    : m.key === 'effective_rate'
+                      ? 'how the per-token rate varies with prompt size'
+                      : `where ${m.label.toLowerCase()} concentrates across prompt sizes`}
+                </span>
+              </div>
+              <div className="panel-body">
+                {scatter.data ? (
+                  <DensityPlot
+                    points={scatter.data.points}
+                    xLogMin={scatter.data.x_log_min}
+                    xLogMax={scatter.data.x_log_max}
+                    count={scatter.data.count}
+                    palette={palette}
+                    thresholdTokens={defaultThreshold}
+                    metric={m}
+                  />
+                ) : (
+                  <div className="empty">Loading…</div>
+                )}
+              </div>
+            </section>
+          ))}
         </div>
 
         <SessionExplorer

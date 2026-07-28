@@ -75,8 +75,8 @@ export const api = {
       signal,
     ),
 
-  scatter: (f: Filters, bins: number, signal?: AbortSignal) =>
-    get<ScatterGrid>(`/api/scatter?${query(f, { bins })}`, signal),
+  scatter: (f: Filters, signal?: AbortSignal) =>
+    get<ScatterGrid>(`/api/scatter?${query(f)}`, signal),
 
   events: (f: Filters, signal?: AbortSignal) =>
     get<EventMarker[]>(`/api/events?${query(f)}`, signal),

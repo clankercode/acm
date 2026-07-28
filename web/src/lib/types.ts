@@ -359,11 +359,23 @@ export interface CalendarDay extends Totals {
   top: { key: string; cost: number }[]
 }
 
+export interface ScatterPoint {
+  /** Prompt size on the log-x axis, as a [0,1] fraction of the log range. */
+  x: number
+  /** Request count this bucket-point represents. */
+  n: number
+  input: number
+  cache_rate: number
+  effective_rate: number
+  output_rate: number
+  cost: number
+  output_tokens: number
+}
+
 export interface ScatterGrid {
-  bins: { x: number; y: number; n: number }[]
+  points: ScatterPoint[]
   x_log_min: number
   x_log_max: number
-  size: number
   count: number
   max_input: number
 }

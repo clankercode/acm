@@ -240,10 +240,8 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
         return A.calendar(engine.store, engine.pricing, filters_from(request), tz_offset)
 
     @app.get("/api/scatter")
-    def get_scatter(request: Request, bins: int = 40) -> dict:
-        return A.context_scatter(
-            engine.store, engine.pricing, filters_from(request), bins=max(4, min(bins, 80))
-        )
+    def get_scatter(request: Request) -> dict:
+        return A.context_scatter(engine.store, engine.pricing, filters_from(request))
 
     @app.get("/api/events")
     def get_events(request: Request) -> list[dict]:

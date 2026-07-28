@@ -641,44 +641,77 @@ def calendar(
     return {"days": out, "tz_offset": tz_offset_min}
 
 
-def context_scatter(
-    store: Store, pricing: PricingTable, filters: Filters, bins: int = 40
-) -> dict:
-    """2D histogram of per-request cache rate against prompt size.
+#: Fields the scatter needs to bin by any metric client-side. Slightly wider
+#: than BUCKET_COLUMNS because prompt size and output are their own columns.
+SCATTER_COLUMNS = (
+    "hour, source, model, provider, base_model, repo, is_subagent, long_ctx,"
+    " n, input_tokens, cached_tokens, cache_write_tokens,"
+    " cache_write_1h_tokens, output_tokens, reasoning_tokens, max_input"
+)
 
-    Rendered as a density map rather than raw points: at 105k requests a
-    scatter plot is a solid block, and the interesting structure is where the
-    mass sits.
+
+def context_scatter(
+    store: Store, pricing: PricingTable, filters: Filters
+) -> dict:
+    """Per-bucket points for density plots of any metric against prompt size.
+
+    Each hourly rollup bucket becomes a weighted point: its prompt size (the
+    mean of the requests in it) on x, and every metric the dashboard knows on
+    y. The client bins these into a 2D grid and can swap the y metric without a
+    round trip.
+
+    Reading from ``bucket_hour`` rather than ``requests`` is the fix for
+    imported machines: an import has no per-request rows, only the rollup, so
+    the old query found nothing. The rollup is also the 99:1 compression that
+    makes a whole machine's history small enough to move between machines.
     """
-    where, params = filters.where(
-        hour_column="r.ts", ms=True, columns=REQUEST_COLUMNS_SQL
-    )
+    where, params = filters.where()
     rows = store.query(
-        f"""SELECT r.input_tokens AS i, r.cached_tokens AS c,
-                   COALESCE(NULLIF(r.model,''),'unknown') AS model
-            FROM requests r LEFT JOIN sessions s ON s.rollout_id = r.rollout_id
-            WHERE {where} AND r.input_tokens > 0""",
+        f"SELECT {SCATTER_COLUMNS} FROM bucket_hour WHERE {where} AND input_tokens > 0",
         params,
     )
     if not rows:
-        return {"bins": [], "max_input": 0, "count": 0}
-    max_input = max(r["i"] for r in rows)
-    #  Log-x, because prompt sizes span three orders of magnitude.
-    lo = math.log10(max(1, min(r["i"] for r in rows)))
+        return {"points": [], "max_input": 0, "count": 0}
+
+    max_input = max(r["max_input"] for r in rows)
+    # Log-x, because prompt sizes span three orders of magnitude. The range
+    # runs from the smallest bucket's mean prompt to the largest single
+    # request ever seen, so the x extent covers everything a point can land on.
+    lo = math.log10(max(1, min(r["input_tokens"] / r["n"] for r in rows)))
     hi = math.log10(max(max_input, 10))
     span = max(hi - lo, 1e-9)
-    grid: dict[tuple[int, int], int] = {}
-    for row in rows:
-        x = int((math.log10(max(row["i"], 1)) - lo) / span * (bins - 1))
-        y = int(row["c"] / row["i"] * (bins - 1))
-        key = (min(max(x, 0), bins - 1), min(max(y, 0), bins - 1))
-        grid[key] = grid.get(key, 0) + 1
+
+    points: list[dict] = []
+    count = 0
+    for r in rows:
+        n = r["n"]
+        inp = r["input_tokens"]
+        cost = _row_cost(pricing, r)
+        # A bucket is an aggregate, so prompt size is its mean -- good enough
+        # for where the mass sits, which is what a density plot is for.
+        mean_input = inp / n
+        x_frac = (math.log10(max(mean_input, 1)) - lo) / span
+        points.append(
+            {
+                "x": x_frac,
+                # Every metric the client might want to bin on, precomputed
+                # here so a metric switch is free.
+                "n": n,
+                "input": mean_input,
+                "cache_rate": (r["cached_tokens"] / inp) if inp else 0.0,
+                "effective_rate": effective_rate(cost.cost, inp),
+                "output_rate": effective_rate(cost.output_cost, r["output_tokens"]),
+                "cost": cost.cost,
+                "output_tokens": r["output_tokens"],
+            }
+        )
+        count += n
+
     return {
-        "bins": [{"x": x, "y": y, "n": n} for (x, y), n in sorted(grid.items())],
+        "points": points,
         "x_log_min": lo,
         "x_log_max": hi,
-        "size": bins,
-        "count": len(rows),
+        "count": count,
         "max_input": max_input,
     }
 

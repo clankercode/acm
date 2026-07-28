@@ -5,11 +5,29 @@ import type { HeatCell } from '../lib/types'
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
+/**
+ * A metric the heatmap can colour by. Extracts a scalar from each cell's
+ * Totals, knows how to format and scale it, and whether dark means bad.
+ */
+export interface HeatmapMetric {
+  key: string
+  /** What appears in the panel title: "{label} by hour and weekday". */
+  label: string
+  extract: (c: HeatCell) => number
+  format: (v: number) => string
+  /** "volume" scales from zero; "rate" scales across the observed band. */
+  scale: 'volume' | 'rate'
+  /** Dark means worse — cache rate inverts so dark = more misses. */
+  invert?: boolean
+  /** Legend end labels. */
+  lowLabel: string
+  highLabel: string
+}
+
 interface Props {
   cells: HeatCell[]
   palette: Palette
-  /** Continuous magnitude to encode, in [0, 1] after normalisation. */
-  metric: 'cache_rate' | 'effective_rate'
+  metric: HeatmapMetric
 }
 
 /**
@@ -26,23 +44,23 @@ export function Heatmap({ cells, palette, metric }: Props) {
     let hi = -Infinity
     for (const c of cells) {
       g.set(`${c.day}:${c.hour}`, c)
-      const v = metric === 'cache_rate' ? c.cache_rate : c.effective_rate
+      const v = metric.extract(c)
       if (!isFinite(v)) continue
       lo = Math.min(lo, v)
       hi = Math.max(hi, v)
     }
     return { grid: g, min: isFinite(lo) ? lo : 0, max: isFinite(hi) ? hi : 1 }
-  }, [cells, metric])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cells, metric.key])
 
   if (!cells.length) return <div className="empty">Nothing in this range</div>
 
   const span = max - min || 1
-  // Cache rate reads better inverted: darker means more cache misses, which is
-  // the thing worth spotting.
   const normalise = (c: HeatCell) => {
-    const v = metric === 'cache_rate' ? c.cache_rate : c.effective_rate
-    const t = (v - min) / span
-    return metric === 'cache_rate' ? 1 - t : t
+    const v = metric.extract(c)
+    const t = metric.scale === 'volume' ? v / (max || 1) : (v - min) / span
+    const clamped = Math.max(0, Math.min(1, t))
+    return metric.invert ? 1 - clamped : clamped
   }
 
   return (
@@ -51,17 +69,15 @@ export function Heatmap({ cells, palette, metric }: Props) {
           grid at the same y as a line chart beside it. */}
       <div className="chart-scale">
         <div className="scale">
-          <span>{metric === 'cache_rate' ? 'best cache' : 'cheapest'}</span>
+          <span>{metric.lowLabel}</span>
           <span className="ramp">
             {palette.seq.map((hex, i) => (
               <i key={i} style={{ background: hex }} />
             ))}
           </span>
-          <span>{metric === 'cache_rate' ? 'worst cache' : 'dearest'}</span>
+          <span>{metric.highLabel}</span>
           <span style={{ marginLeft: 6 }}>
-            {metric === 'cache_rate'
-              ? `(${pct(min, 0)} – ${pct(max, 0)})`
-              : `(${rate(min)} – ${rate(max)})`}
+            ({metric.format(min)} – {metric.format(max)})
           </span>
           <span
             className="heat-cell empty"
