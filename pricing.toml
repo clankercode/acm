@@ -1,0 +1,229 @@
+# Per-token pricing in USD per million tokens.
+#
+# Costs are derived at query time from stored token counts, so edits here take
+# effect immediately. Changing a `long_context_threshold` additionally triggers
+# a bucket rebuild, because the threshold decides which tier each request lands
+# in.
+#
+#   cost = (input - cached - cache_write - cache_write_1h) * input_rate
+#        + cached         * cached_input_rate
+#        + cache_write    * cache_write_rate
+#        + cache_write_1h * cache_write_1h_rate
+#        + output         * output_rate
+#
+# `input` is the whole prompt; the other prompt categories are subsets of it.
+# `cache_write*` default to 0, which is correct for OpenAI, xAI and MiniMax --
+# they populate their caches for free and never report the tokens. Anthropic
+# charges for them, so those entries set the rates explicitly.
+#
+# Two tiers apply. Requests whose *prompt* (input) token count exceeds
+# `long_context_threshold` are billed at the [models.X.long] rates; everything
+# else uses the short rates on the model table itself. Over the Codex corpus 25%
+# of requests but 42% of input tokens fall in the long tier, so the distinction
+# is not a rounding error.
+#
+# Reasoning tokens are a subset of output tokens on OpenAI and Pi, and a
+# disjoint category on OpenCode; each reader normalises to billable output
+# before storing, so reasoning is only ever reported informationally here.
+#
+# Model keys match the bare model name after any provider prefix ("pooler/",
+# "minimax/", "zai-coding-plan/") is stripped. Use `inherit` to alias one model
+# to another.
+
+[defaults]
+# Threshold used by any model that does not set its own.
+long_context_threshold = 200_000
+
+[models."gpt-5.6-sol"]
+input = 5.00
+cached_input = 0.50
+output = 30.00
+long_context_threshold = 200_000
+source = "https://developers.openai.com/api/docs/pricing"
+[models."gpt-5.6-sol".long]
+input = 10.00
+cached_input = 1.00
+output = 45.00
+
+[models."gpt-5.6-terra"]
+input = 2.50
+cached_input = 0.25
+output = 15.00
+long_context_threshold = 200_000
+source = "https://developers.openai.com/api/docs/pricing"
+[models."gpt-5.6-terra".long]
+input = 5.00
+cached_input = 0.50
+output = 22.50
+
+[models."gpt-5.6-luna"]
+input = 1.00
+cached_input = 0.10
+output = 6.00
+long_context_threshold = 200_000
+source = "https://developers.openai.com/api/docs/pricing"
+[models."gpt-5.6-luna".long]
+input = 2.00
+cached_input = 0.20
+output = 9.00
+
+[models."gpt-5.5"]
+input = 5.00
+cached_input = 0.50
+output = 30.00
+long_context_threshold = 200_000
+source = "https://benchlm.ai/openai/api-pricing"
+[models."gpt-5.5".long]
+input = 10.00
+cached_input = 1.00
+output = 45.00
+
+[models."gpt-5.4"]
+input = 2.50
+cached_input = 0.25
+output = 15.00
+long_context_threshold = 200_000
+source = "https://developers.openai.com/api/docs/pricing"
+[models."gpt-5.4".long]
+input = 5.00
+cached_input = 0.50
+output = 22.50
+
+# The OpenAI pricing page shows no long-context tier for gpt-5.4-mini, so the
+# short rates apply at every context length.
+[models."gpt-5.4-mini"]
+input = 0.75
+cached_input = 0.075
+output = 4.50
+source = "https://wavespeed.ai/blog/posts/gpt-5-4-mini-pricing/"
+
+# xAI documents that rates shift past 200K but does not publish the long-tier
+# numbers. Every grok request in this corpus is under the threshold, so the
+# absence costs nothing today; the Data Quality panel flags it if that changes.
+[models."grok-4.5"]
+input = 2.00
+cached_input = 0.50
+output = 6.00
+long_tier_unknown = true
+source = "https://apidog.com/blog/grok-4-5-pricing/"
+
+[models."grok-composer-2.5-fast"]
+input = 3.00
+# xAI's published cache discount is 25% of the input rate; the cached rate for
+# this specific model is not documented, so this is inferred.
+cached_input = 0.75
+output = 15.00
+estimated = true
+long_tier_unknown = true
+source = "https://mem0.ai/blog/xai-grok-api-pricing"
+
+# Provider-prefixed variants resolve to their base model automatically. Add an
+# explicit entry such as [models."pooler/gpt-5.6-sol"] to price a route
+# differently.
+
+
+# ---------------------------------------------------------------------------
+# Anthropic -- used by the Claude Code client.
+#
+# Cache writes are billed: 1.25x base input for a 5-minute entry, 2x for a
+# 1-hour one, against cache reads at 0.1x. Claude Code writes long-TTL entries
+# by default, so the 2x column is the one that matters here.
+#
+# Claude 4.6 and later carry the full 1M context window at standard pricing, so
+# there is deliberately no [long] table on these -- unlike the GPT-5.6 family,
+# a 900k prompt bills at exactly the same per-token rate as a 9k one.
+
+[models."claude-opus-5"]
+input = 5.00
+cached_input = 0.50
+cache_write = 6.25
+cache_write_1h = 10.00
+output = 25.00
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+
+[models."claude-opus-4-8"]
+inherit = "claude-opus-5"
+
+[models."claude-fable-5"]
+input = 10.00
+cached_input = 1.00
+cache_write = 12.50
+cache_write_1h = 20.00
+output = 50.00
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+
+[models."claude-sonnet-4-6"]
+input = 3.00
+cached_input = 0.30
+cache_write = 3.75
+cache_write_1h = 6.00
+output = 15.00
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+
+# Introductory pricing, in effect through 2026-08-31; reverts to 3/0.30/15
+# after that.
+[models."claude-sonnet-5"]
+input = 2.00
+cached_input = 0.20
+cache_write = 2.50
+cache_write_1h = 4.00
+output = 10.00
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+
+[models."claude-haiku-4-5"]
+input = 1.00
+cached_input = 0.10
+cache_write = 1.25
+cache_write_1h = 2.00
+output = 5.00
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+
+# Claude Code reports dated model ids for some models and bare ones for others.
+[models."claude-haiku-4-5-20251001"]
+inherit = "claude-haiku-4-5"
+
+
+# ---------------------------------------------------------------------------
+# MiniMax -- used by the Pi client.
+#
+# Cache writes are free and unreported. The long tier starts at 512k rather
+# than 200k and doubles every category including cache reads.
+
+[models."MiniMax-M3"]
+input = 0.30
+cached_input = 0.06
+output = 1.20
+long_context_threshold = 512_000
+source = "https://devtk.ai/en/models/minimax-m3/"
+[models."MiniMax-M3".long]
+input = 0.60
+cached_input = 0.12
+output = 2.40
+
+
+# ---------------------------------------------------------------------------
+# Z.ai -- reached through the OpenCode client's zai-coding-plan provider.
+# Priced here at Z.ai's own list rate, which is the pay-as-you-go equivalent of
+# what the coding-plan subscription covers.
+
+[models."glm-5.2"]
+input = 1.40
+cached_input = 0.26
+output = 4.40
+source = "https://www.aipricing.guru/models/z-ai-glm-5-2/"
+
+
+# ---------------------------------------------------------------------------
+# OpenCode Zen free tier. These are genuinely $0 during the beta, not unpriced:
+# an explicit zero keeps them out of the Data Quality "unpriced" list while
+# still contributing their token volume to every chart.
+
+[models."big-pickle"]
+input = 0.0
+cached_input = 0.0
+output = 0.0
+source = "https://opencode.ai/docs/zen/"
+
+[models."deepseek-v4-flash-free"]
+inherit = "big-pickle"
+source = "https://opencode.ai/docs/zen/"
