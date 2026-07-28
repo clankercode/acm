@@ -103,7 +103,8 @@ class HermesSource(Source):
             out = ParseOutput()
             high_water = since
             rows = conn.execute(
-                "SELECT session_id, model, billing_provider, task,"
+                "SELECT session_id, model, billing_provider, billing_base_url,"
+                " billing_mode, task,"
                 " api_call_count, input_tokens, output_tokens,"
                 " cache_read_tokens, cache_write_tokens, reasoning_tokens,"
                 " estimated_cost_usd, actual_cost_usd, first_seen, last_seen"
@@ -141,8 +142,12 @@ class HermesSource(Source):
             session_id = row["session_id"] or ""
             model_key = row["model"] or "unknown"
             provider = row["billing_provider"] or ""
-            # Dedup key: Hermes' own composite identity, stable across re-reads.
-            dk = f"{session_id}|{model_key}|{provider}|{row['task'] or ''}"
+            base_url = row["billing_base_url"] or ""
+            mode = row["billing_mode"] or ""
+            # Dedup key: Hermes' own 6-column composite identity, stable
+            # across re-reads.  All six are needed — the table has two rows
+            # that differ only in billing_base_url (local vs cloud).
+            dk = f"{session_id}|{model_key}|{provider}|{base_url}|{mode}|{row['task'] or ''}"
             ts = int(float(row["first_seen"] or last_seen) * 1000)
 
             cost = row["actual_cost_usd"]
@@ -168,7 +173,11 @@ class HermesSource(Source):
                 )
             )
 
-        if high_water == since:
+        # Skip the write only when the cursor didn't move AND we have no
+        # rows to emit.  On a first pass (since == 0.0) every row passes
+        # the WHERE filter; if high_water stays 0.0 because all rows have
+        # NULL/zero last_seen, we must still write them.
+        if high_water == since and not out.requests:
             return UnitResult(
                 raw_events=out.raw_events, bytes_read=out.bytes_read, rows=out.rows
             )

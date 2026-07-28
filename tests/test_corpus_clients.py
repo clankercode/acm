@@ -606,7 +606,8 @@ def reference_hermes() -> dict:
     conn = sqlite3.connect(f"file:{HERMES}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     for row in conn.execute(
-        "SELECT session_id, model, billing_provider, task, api_call_count,"
+        "SELECT session_id, model, billing_provider, billing_base_url,"
+        " billing_mode, task, api_call_count,"
         " input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,"
         " reasoning_tokens"
         " FROM session_model_usage"
@@ -614,8 +615,10 @@ def reference_hermes() -> dict:
         sid = row["session_id"] or ""
         model = row["model"] or "unknown"
         provider = row["billing_provider"] or ""
+        base_url = row["billing_base_url"] or ""
+        mode = row["billing_mode"] or ""
         task = row["task"] or ""
-        dk = f"{sid}|{model}|{provider}|{task}"
+        dk = f"{sid}|{model}|{provider}|{base_url}|{mode}|{task}"
         fresh = row["input_tokens"] or 0
         cache_read = row["cache_read_tokens"] or 0
         cache_write = row["cache_write_tokens"] or 0
@@ -734,9 +737,10 @@ def reference_gemini():
             cached = int(tokens.get("cached") or 0)
             output = int(tokens.get("output") or 0)
             thoughts = int(tokens.get("thoughts") or 0)
+            tool = int(tokens.get("tool") or 0)
             if cached > prompt:
                 cached = prompt
-            rows[str(dk)] = (prompt, cached, 0, output + thoughts, thoughts)
+            rows[str(dk)] = (prompt, cached, 0, output + thoughts + tool, thoughts)
     return {"requests": rows, "raw": raw}
 
 

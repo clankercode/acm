@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 from ..store import Store
-from .base import ParseOutput, Source, Unit, UnitResult, request_row, session_row
+from .base import ParseOutput, Source, Unit, UnitResult, parse_ts, request_row, session_row
 
 #: Read in slices so a very large history cannot build one enormous batch.
 BATCH_ROWS = 5_000
@@ -113,7 +113,7 @@ class CopilotSource(Source):
                 out.flag("reasoning_gt_output")
 
             session_id = row["session_id"] or ""
-            ts = parse_iso_ms(row["created_at"])
+            ts = parse_ts(row["created_at"]) or 0
 
             out.requests.append(
                 request_row(
@@ -181,21 +181,3 @@ class CopilotSource(Source):
             git_branch=meta["branch"],
             thread_source="main",
         )
-
-
-def parse_iso_ms(raw: str | None) -> int:
-    """Epoch milliseconds from a Copilot ISO-8601 ``created_at`` string.
-
-    Copilot writes ``2026-07-11T03:48:42.951Z``. The base reader's ``parse_ts``
-    would do this too, but importing it from the generic helper is avoided here
-    to keep the convention explicit and the source self-contained.
-    """
-    if not raw:
-        return 0
-    from datetime import datetime
-
-    try:
-        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return 0
-    return int(dt.timestamp() * 1000)

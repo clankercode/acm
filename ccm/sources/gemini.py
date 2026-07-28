@@ -90,6 +90,7 @@ class GeminiParser:
         cached = int(tokens.get("cached") or 0)
         output = int(tokens.get("output") or 0)
         thoughts = int(tokens.get("thoughts") or 0)
+        tool = int(tokens.get("tool") or 0)
 
         if cached > prompt:
             out.flag("cached_gt_input")
@@ -105,9 +106,9 @@ class GeminiParser:
                 model=record.get("model"),
                 input_tokens=prompt,
                 cached_tokens=cached,
-                # Fold thoughts into output so the total invariant
-                # (total == input + output) stays quiet when tool == 0.
-                output_tokens=output + thoughts,
+                # Fold thoughts and tool into output so the total invariant
+                # (total == input + output) stays quiet.
+                output_tokens=output + thoughts + tool,
                 reasoning_tokens=thoughts,
             )
         )

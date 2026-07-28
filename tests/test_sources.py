@@ -1125,7 +1125,6 @@ def test_gemini_parses_tokens_and_folds_thoughts(tmp_path, store):
     (row,) = rows(store, "gemini")
     assert row["input_tokens"] == 17553
     assert row["cached_tokens"] == 15917
-    # thoughts folded into output
     assert row["output_tokens"] == 33 + 426
     assert row["reasoning_tokens"] == 426
     assert row["model"] == "gemini-3-flash-preview"
