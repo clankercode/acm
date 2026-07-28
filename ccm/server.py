@@ -435,14 +435,27 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
         # has to be able to say "not from here" before it is pressed.
         refusal = updater.may_start_from(request.client.host if request.client else None)
         if refusal:
-            return {**status.as_dict(), "available": False, "reason": refusal}
+            # The transcript and the checkout path are withheld, not just the
+            # verdict: together they name a filesystem path (so the username),
+            # the commits being deployed, and whatever paths a failing build
+            # printed -- reconnaissance handed to exactly the caller we just
+            # refused.
+            return {
+                **status.as_dict(),
+                "available": False,
+                "reason": refusal,
+                "log": "",
+                "checkout": None,
+            }
         return status.as_dict()
 
     @app.post("/api/update")
     def post_update(request: Request) -> dict:
-        refusal = updater.may_start_from(
-            request.client.host if request.client else None
-        ) or updater.cross_site_problem(request.headers)
+        refusal = (
+            updater.may_start_from(request.client.host if request.client else None)
+            or updater.cross_site_problem(request.headers)
+            or updater.host_header_problem(request.headers)
+        )
         if refusal:
             # 403 rather than 409: this is about who is asking, and no amount of
             # retrying from the same place will change the answer.

@@ -167,6 +167,133 @@ def test_a_page_on_another_site_cannot_spend_the_endpoint(base, tmp_path):
     assert updater.cross_site_problem({"sec-fetch-site": "same-origin"}) is None
 
 
+def test_the_dev_proxy_is_not_mistaken_for_another_site(base, tmp_path):
+    """Vite rewrites Host but not Origin, and both name this machine.
+
+    Without this, every write in `pnpm dev` is refused -- pause, rescan, pricing,
+    delete -- which is a broken dev server rather than a security property.
+    """
+    updater = Updater(replace(base, checkout_path=fake_checkout(tmp_path)))
+    assert (
+        updater.cross_site_problem(
+            {"origin": "http://localhost:5188", "host": "127.0.0.1:8808"}
+        )
+        is None
+    )
+    assert (
+        updater.cross_site_problem({"origin": "http://[::1]:5188", "host": "localhost:8808"})
+        is None
+    )
+    # The relaxation is loopback-to-loopback only.
+    assert updater.cross_site_problem(
+        {"origin": "http://evil.example", "host": "localhost:8808"}
+    )
+    assert updater.cross_site_problem({"origin": "null", "host": "localhost:8808"})
+
+
+def test_an_update_must_be_asked_for_by_this_machines_name(base, tmp_path):
+    """DNS rebinding forges nothing, so the other two guards cannot see it.
+
+    A page on http://evil.example:8808 rebound to 127.0.0.1 is genuinely
+    same-origin, genuinely matches its own Host, and genuinely arrives from a
+    loopback peer. What it cannot do is call this machine localhost.
+    """
+    settings = replace(base, checkout_path=fake_checkout(tmp_path))
+    updater = Updater(settings)
+    assert updater.host_header_problem({"host": "localhost:8808"}) is None
+    assert updater.host_header_problem({"host": "127.0.0.1:8808"}) is None
+    assert updater.host_header_problem({"host": "[::1]:8808"}) is None
+    assert updater.host_header_problem({}) is None  # not a browser
+    refusal = updater.host_header_problem({"host": "evil.example:8808"})
+    assert refusal and "localhost" in refusal
+
+    app = create_app(settings, watch=False)
+    with TestClient(app, client=("127.0.0.1", 9999)) as client:
+        rebound = client.post(
+            "/api/update",
+            headers={
+                "host": "evil.example:8808",
+                "origin": "http://evil.example:8808",
+                "sec-fetch-site": "same-origin",
+            },
+        )
+        assert rebound.status_code == 403
+        assert Updater(settings).running() is False, "an update was started anyway"
+
+    # Opting into LAN updates opts out of this too -- it is the same trust.
+    assert (
+        Updater(replace(settings, update_from_lan=True)).host_header_problem(
+            {"host": "evil.example:8808"}
+        )
+        is None
+    )
+    # Reads are not gated on the name: the dashboard is meant to be read from the
+    # LAN under whatever hostname it has.
+    with TestClient(app, client=("127.0.0.1", 9999)) as client:
+        assert client.get("/api/update", headers={"host": "box.local:8808"}).status_code == 200
+
+
+def test_a_refused_caller_is_told_nothing_about_the_checkout(base, tmp_path):
+    """The verdict is public; the path and the transcript are not.
+
+    Together they leak the username, the commits being deployed, and any paths a
+    failed build printed -- straight to the caller just refused.
+    """
+    settings = replace(base, checkout_path=fake_checkout(tmp_path))
+    updater = Updater(settings)
+    updater.log_path.parent.mkdir(parents=True, exist_ok=True)
+    updater.log_path.write_text("[12:00:00] updating /home/someone/src/ccm\n")
+
+    app = create_app(settings, watch=False)
+    with TestClient(app, client=("192.168.1.50", 9999)) as client:
+        body = client.get("/api/update").json()
+        assert body["available"] is False
+        assert body["log"] == ""
+        assert body["checkout"] is None
+
+    with TestClient(app, client=("127.0.0.1", 9999)) as client:
+        body = client.get("/api/update").json()
+        assert "someone" in body["log"], "the local dashboard still needs the log"
+        assert body["checkout"]
+
+
+def test_two_clicks_cannot_start_two_updates(base, tmp_path):
+    """The endpoint is sync, so two clicks land on two threadpool threads.
+
+    Both can pass a check-then-act test and both can launch a script, leaving two
+    `git pull`s and two `just install`s racing over one checkout.
+    """
+    updater = Updater(replace(base, checkout_path=fake_checkout(tmp_path)))
+    updater.marker_path.parent.mkdir(parents=True, exist_ok=True)
+    # Stand in for the winning thread: the marker exists and is live, but the
+    # loser has already passed its own running() check.
+    updater.marker_path.write_text(f"{time.time():.0f}\n")
+    with pytest.raises(RuntimeError, match="already running"):
+        updater.start()
+
+
+def test_a_slow_build_is_not_declared_dead(base, tmp_path):
+    """The marker is written once, so it is a deadline; the log is the heartbeat.
+
+    A cold `just setup && just build` can outlast STALE_AFTER, and declaring that
+    update dead lets a second one stack on top of it.
+    """
+    updater = Updater(replace(base, checkout_path=fake_checkout(tmp_path)))
+    updater.marker_path.parent.mkdir(parents=True, exist_ok=True)
+    updater.marker_path.write_text("start\n")
+    updater.log_path.write_text("[12:34:56] just build\n")
+    import os
+
+    ancient = time.time() - 3600
+    os.utime(updater.marker_path, (ancient, ancient))
+
+    assert updater.running() is True, "a talking update was declared dead"
+
+    # And a silent one still times out.
+    os.utime(updater.log_path, (ancient, ancient))
+    assert updater.running() is False
+
+
 def test_the_endpoint_reports_why_it_cannot_update(base):
     app = create_app(base, watch=False)
     # An explicit loopback address: TestClient's default is the host "testclient",
@@ -175,7 +302,10 @@ def test_the_endpoint_reports_why_it_cannot_update(base):
         body = client.get("/api/update").json()
         assert body["available"] is False
         assert "CCM_CHECKOUT" in body["reason"]
-        assert client.post("/api/update").status_code == 409
+        # Addressed as localhost, so the rebinding guard has nothing to say and
+        # the answer is the real one: nothing to update from.
+        post = client.post("/api/update", headers={"host": "localhost:8808"})
+        assert post.status_code == 409
 
 
 def test_no_write_endpoint_accepts_a_cross_site_request(base, tmp_path):

@@ -45,6 +45,31 @@ STALE_AFTER = 30 * 60.0
 LOG_TAIL_BYTES = 16 * 1024
 
 
+def _host_only(value: str) -> str:
+    """The host out of a ``Host`` or ``Origin`` header: no scheme, no port."""
+    host = value.split("//")[-1]
+    if host.startswith("["):  # [::1]:8808
+        end = host.find("]")
+        return host[1:end] if end > 0 else host[1:]
+    return host.split(":")[0]
+
+
+def _names_this_machine(host: str) -> bool:
+    """True for a name that can only mean the machine the server runs on.
+
+    ``localhost`` included, because that is what a browser is pointed at and it
+    cannot be made to resolve elsewhere by DNS. Anything else -- including a real
+    hostname that happens to resolve here -- is not this machine for our
+    purposes; see :meth:`Updater.host_header_problem`.
+    """
+    if host in ("localhost", ""):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def _script_for(checkout: Path) -> Path | None:
     """The checkout's own copy of the script, which is the one being installed.
 
@@ -129,6 +154,15 @@ class Updater:
             return False
         if self.done_path.is_file() and self.done_path.stat().st_mtime >= started:
             return False
+        # Liveness from the transcript, not from the start time: the marker is
+        # written once, so a fixed deadline from launch declares a slow-but-alive
+        # update dead -- a cold `just setup && just build` can outlast it -- and
+        # then lets a second update stack on top of the first. Every step the
+        # script takes touches the log, which makes it the heartbeat.
+        try:
+            started = max(started, self.log_path.stat().st_mtime)
+        except OSError:
+            pass
         return (time.time() - started) < STALE_AFTER
 
     def outcome(self) -> str | None:
@@ -204,9 +238,40 @@ class Updater:
             return f"Refusing an update requested from another site ({site})"
         origin = headers.get("origin")
         host = headers.get("host")
-        if origin and host and origin.split("//")[-1] != host:
-            return f"Refusing an update requested from {origin}"
+        if origin and host:
+            from_, to = _host_only(origin), _host_only(host)
+            # Two loopback names are the same machine, and must compare equal:
+            # Vite's dev proxy rewrites Host to 127.0.0.1:8808 while leaving
+            # Origin as localhost:5188, so a literal comparison refuses every
+            # write in `pnpm dev` -- rescan, pause, pricing, delete, update.
+            same = from_ == to or (_names_this_machine(from_) and _names_this_machine(to))
+            if not same:
+                return f"Refusing an update requested from {origin}"
         return None
+
+    def host_header_problem(self, headers) -> str | None:
+        """Refuse an update aimed at this port under someone else's name.
+
+        DNS rebinding walks through both guards above, because it does not forge
+        anything: a page served from ``http://evil.example:8808`` whose name is
+        re-pointed at 127.0.0.1 is genuinely same-origin, its Origin genuinely
+        matches its Host, and its request genuinely arrives from a loopback peer.
+        The one thing it cannot do is call this machine ``localhost``, so that is
+        what we require. Not applied to the other writes: the dashboard is meant
+        to be usable from the LAN under its real hostname, and only this endpoint
+        runs a shell script.
+        """
+        if self.settings.update_from_lan:
+            return None
+        host = headers.get("host")
+        # Absent means not a browser (HTTP/1.1 requires it), and this guard is
+        # only ever about browsers.
+        if host is None or _names_this_machine(_host_only(host)):
+            return None
+        return (
+            f"Refusing an update requested at {host}. Updates must be requested "
+            "from http://localhost or a loopback address"
+        )
 
     def start(self) -> Status:
         """Launch the script. Raises RuntimeError if it must not run."""
@@ -222,14 +287,36 @@ class Updater:
         assert script is not None
 
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        # Cleared first: a stale "status=ok" beside a running attempt would read
-        # as an update that had already succeeded.
+        # The marker is the lock, claimed by creating it exclusively rather than
+        # by writing it: the endpoint is sync, so two clicks land on two
+        # threadpool threads and the check above can pass on both, leaving two
+        # `git pull`s and two `just install`s racing over one checkout. Removing
+        # a marker we have just judged dead is the only window left, and it costs
+        # nothing to lose that race.
+        if self.marker_path.exists():
+            self.marker_path.unlink(missing_ok=True)
+        try:
+            fd = os.open(self.marker_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError as exc:
+            raise RuntimeError("An update is already running") from exc
+        with os.fdopen(fd, "w") as fh:
+            fh.write(f"{time.time():.0f}\n")
+        # Cleared after the claim: a stale "status=ok" beside a running attempt
+        # would read as an update that had already succeeded.
         self.done_path.unlink(missing_ok=True)
         self.log_path.write_text("[starting] update requested\n")
-        self.marker_path.write_text(f"{time.time():.0f}\n")
 
-        argv = ["bash", str(script), str(checkout), str(self.log_path)]
         runner = shutil.which("systemd-run")
+        # The script is told whether it will survive restarting the service, so
+        # it can install and say so honestly instead of being killed mid-restart
+        # and never writing an outcome at all.
+        argv = [
+            "bash",
+            str(script),
+            str(checkout),
+            str(self.log_path),
+            "restart" if runner else "norestart",
+        ]
         if runner:
             # Its own transient unit, or restarting ccm.service part-way through
             # would kill the update along with the server.

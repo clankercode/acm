@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pull, rebuild, reinstall and restart, from the dashboard's Update button.
 #
-#   packaging/self-update.sh <checkout> <logfile>
+#   packaging/self-update.sh <checkout> <logfile> [restart|norestart]
 #
 # Runs detached from the server that asked for it, because the last thing it
 # does is restart that server. Everything it says goes to the log, which the
@@ -11,6 +11,8 @@ set -uo pipefail
 
 checkout="${1:?usage: self-update.sh <checkout> <logfile>}"
 log="${2:?usage: self-update.sh <checkout> <logfile>}"
+# "restart" only when the caller launched us somewhere that survives it.
+restart="${3:-norestart}"
 unit="ccm.service"
 
 mkdir -p "$(dirname "$log")"
@@ -48,14 +50,28 @@ just setup || fail "just setup"
 just build || fail "just build"
 just install || fail "just install"
 
-if systemctl --user is-active --quiet "$unit"; then
+if ! systemctl --user is-active --quiet "$unit"; then
+    # Not a failure, but not a finished update either: whatever is serving the
+    # dashboard right now is still the old build, and saying "done" would be a
+    # lie the panel repeats.
+    say "installed, but $unit is not running -- the process serving this page is"
+    say "still the old build. Restart however you started it."
+elif [ "$restart" = norestart ]; then
+    # No systemd-run, so this script lives inside the service's own cgroup and
+    # `systemctl restart` would kill it here -- no outcome written, the panel
+    # stuck on "Updating..." forever, after a successful update.
+    say "installed, but not restarting: without systemd-run this script would be"
+    say "killed by the restart. Run: systemctl --user restart $unit"
+else
     say "restarting $unit"
     # The server dies here; the browser reconnects on its own and notices the
-    # new build. Nothing after this line is guaranteed to be read by anyone.
+    # new build. The outcome is written first, because nothing after this line is
+    # guaranteed to run: the restart may take this script's cgroup with it.
+    say "done"
+    echo "status=ok" >"$log.done"
     systemctl --user restart "$unit" || fail "systemctl --user restart $unit"
     say "restarted $unit"
-else
-    say "$unit is not running; nothing to restart"
+    exit 0
 fi
 
 say "done"

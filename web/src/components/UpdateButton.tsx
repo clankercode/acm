@@ -21,6 +21,7 @@ export function UpdateButton() {
   const [status, setStatus] = useState<UpdateStatus | null>(null)
   const [open, setOpen] = useState(false)
   const [watching, setWatching] = useState(false)
+  const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
 
@@ -46,13 +47,17 @@ export function UpdateButton() {
     return () => window.clearInterval(timer)
   }, [watching, refresh])
 
-  // Stop polling once the script has said how it went. Waiting on `outcome`
-  // rather than on `running` alone matters: between the request and the marker
-  // being written, an attempt is neither running nor finished, and treating that
-  // gap as finished would end the watch a moment after it began.
+  // Stop polling once the attempt is over, whether or not it managed to say how
+  // it went. An update killed by the very restart it asked for -- the usual fate
+  // where systemd-run is unavailable -- writes no outcome at all, and waiting for
+  // one leaves the panel saying "Updating…" forever after a *successful* update.
+  // `seenRunning` is what keeps that from firing in the gap between the request
+  // and the marker, where an attempt is neither running nor finished.
+  const seenRunning = useRef(false)
   useEffect(() => {
     if (!watching || !status) return
-    if (!status.running && status.outcome) setWatching(false)
+    if (status.running) seenRunning.current = true
+    else if (status.outcome || seenRunning.current) setWatching(false)
   }, [watching, status])
 
   useEffect(() => {
@@ -74,13 +79,21 @@ export function UpdateButton() {
   const running = watching || !!status?.running
 
   async function start() {
+    // Guarded against a second click while the first POST is still open: the
+    // server claims its lock when the request arrives, so two clicks in quick
+    // succession are two updates racing over one checkout.
+    if (starting) return
     setError(null)
+    setStarting(true)
     setWatching(true)
+    seenRunning.current = false
     try {
       setStatus(await api.startUpdate())
     } catch (e) {
       setWatching(false)
       setError(e instanceof Error ? e.message : 'could not start the update')
+    } finally {
+      setStarting(false)
     }
   }
 
@@ -125,8 +138,13 @@ export function UpdateButton() {
                 <button className="btn" type="button" onClick={() => setOpen(false)}>
                   Cancel
                 </button>
-                <button className="btn primary" type="button" onClick={start}>
-                  Update now
+                <button
+                  className="btn primary"
+                  type="button"
+                  onClick={start}
+                  aria-disabled={starting}
+                >
+                  {starting ? 'Starting…' : 'Update now'}
                 </button>
               </div>
             </>
@@ -140,7 +158,11 @@ export function UpdateButton() {
                     ? 'Updating'
                     : status?.outcome === 'failed'
                       ? 'Update failed'
-                      : 'Last update'}
+                      : status?.outcome === 'ok'
+                        ? 'Last update'
+                        : // No outcome recorded: most likely the restart took the
+                          // script with it. The log is the only honest answer.
+                          'Update ended — see the log'}
                 </span>
                 <button className="btn" type="button" onClick={() => setOpen(false)}>
                   Close
@@ -155,8 +177,13 @@ export function UpdateButton() {
               )}
               {!running && status?.available && (
                 <div className="update-actions">
-                  <button className="btn" type="button" onClick={start}>
-                    Run again
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={start}
+                    aria-disabled={starting}
+                  >
+                    {starting ? 'Starting…' : 'Run again'}
                   </button>
                 </div>
               )}
