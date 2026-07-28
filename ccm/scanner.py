@@ -19,7 +19,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .sources import Source, build_sources
-from .sources.base import parse_ts, project_label  # re-exported for convenience
+from .sources.base import (  # parse_ts/project_label re-exported for convenience
+    cancellation,
+    parse_ts,
+    project_label,
+)
 from .sources.codex import (  # noqa: F401  -- kept importable at the old path
     EVENT_KINDS,
     CodexSource,
@@ -328,8 +332,17 @@ class Scanner:
         *,
         on_progress: Callable[[ScanProgress], None] | None = None,
         phase: str = "scanning",
+        should_stop: Callable[[], bool] | None = None,
     ) -> ScanProgress:
-        """One full pass: ingest whatever is new since the last pass."""
+        """One full pass: ingest whatever is new since the last pass.
+
+        ``should_stop`` is polled between files, and inside them by the readers
+        (see :func:`ccm.sources.base.cancellation`). A cold scan of a large
+        corpus runs for minutes, and shutdown waits on this thread, so without
+        a way to leave early Ctrl-C would appear to hang for as long as the
+        join allows. Whatever has been ingested so far is already committed,
+        and the next pass resumes from the stored offsets.
+        """
         p = self.progress
         p.phase = "discovering"
         p.started_at = time.time()
@@ -367,6 +380,10 @@ class Scanner:
         # true denominator from the first byte rather than growing as it goes.
         plans: list[tuple[Source, list]] = []
         for source in self.sources:
+            if should_stop is not None and should_stop():
+                p.phase = "tailing"
+                p.finished_at = time.time()
+                return p
             try:
                 units = source.plan(self.store)
             except Exception as exc:  # a broken client must not stop the others
@@ -400,9 +417,16 @@ class Scanner:
             slice_ = p.sources[source.name]
             p.current_source = source.name
             for unit in units:
+                if should_stop is not None and should_stop():
+                    p.current_file = None
+                    p.current_source = None
+                    p.phase = "tailing"
+                    p.finished_at = time.time()
+                    return p
                 p.current_file = unit.key
                 try:
-                    result = source.ingest(self.store, unit)
+                    with cancellation(should_stop):
+                        result = source.ingest(self.store, unit)
                 except Exception as exc:
                     p.note_error(str(exc), source=source.name, file=unit.key)
                     p.files_done += 1

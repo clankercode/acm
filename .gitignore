@@ -9,4 +9,6 @@ __pycache__/
 web/node_modules/
 web/dist/
 web/tsconfig.tsbuildinfo
+ccm/_web/
+dist/
 .worktrees/

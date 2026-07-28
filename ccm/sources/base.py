@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -269,6 +270,27 @@ class Source:
 # ---------------------------------------------------------------------------
 # shared JSONL machinery
 
+_should_stop: Callable[[], bool] | None = None
+
+
+@contextmanager
+def cancellation(should_stop: Callable[[], bool] | None) -> Iterator[None]:
+    """Let a reader abandon the file it is part-way through.
+
+    Checking only between files is not enough to shut down promptly: a cold
+    pass can spend minutes inside a single large rollout, which is longer than
+    shutdown will wait for this thread. One module-level hook covers every
+    reader because the scan is single-threaded by design -- see
+    :mod:`ccm.engine`, where one worker owns all writes.
+    """
+    global _should_stop
+    previous = _should_stop
+    _should_stop = should_stop
+    try:
+        yield
+    finally:
+        _should_stop = previous
+
 
 def read_new_lines(
     path: Path, start_offset: int, feed: Callable[[bytes], None]
@@ -277,7 +299,9 @@ def read_new_lines(
 
     Returns ``(bytes_read, new_offset, error, rows)``. The offset advances only
     over bytes that formed complete lines, so a record still being written is
-    re-read intact next pass rather than being parsed in half.
+    re-read intact next pass rather than being parsed in half. Stopping early is
+    safe for exactly the same reason: the offset covers what was actually fed,
+    and the next pass resumes from there.
 
     ``rows`` counts the lines handed to ``feed``, which is the honest measure of
     how much history was read: only a small fraction of them carry token counts,
@@ -291,6 +315,8 @@ def read_new_lines(
         with path.open("rb") as fh:
             fh.seek(start_offset)
             while True:
+                if _should_stop is not None and _should_stop():
+                    break
                 chunk = fh.read(READ_CHUNK)
                 if not chunk:
                     break

@@ -21,8 +21,23 @@ ccm = "ccm.__main__:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build]
+# The built dashboard is a build product, so it is gitignored, and hatchling
+# skips gitignored files unless they are named here. `just build-web` stages it.
+# It belongs in the sdist too: uv builds the wheel out of the sdist.
+artifacts = ["ccm/_web/**"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["ccm"]
+
+[tool.hatch.build.targets.wheel.force-include]
+# An installed copy has no checkout to read the rate table from, so it carries
+# one and writes it out to the config directory on first run.
+"pricing.toml" = "ccm/pricing.default.toml"
+
+[tool.hatch.build.targets.sdist]
+include = ["ccm", "web", "tests", "packaging", "pricing.toml", "justfile", "README.md", "RELEASE.md"]
+exclude = ["web/dist", "web/node_modules"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

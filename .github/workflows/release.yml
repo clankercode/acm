@@ -1,0 +1,91 @@
+name: release
+
+# Pushing a `v*` tag publishes the release. `just tag` is what pushes it, and
+# RELEASE.md is the procedure around that.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: An existing tag to build and publish
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          # The release notes are the commit subjects since the previous tag,
+          # so the whole history and every tag has to be here.
+          fetch-depth: 0
+
+      - name: Check the tag against pyproject.toml
+        id: meta
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+          if [ "$tag" != "v$version" ]; then
+            echo "::error::tag $tag does not match the version in pyproject.toml ($version)"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # A tag like v0.2.0-rc1 is published, but not as the latest release.
+          case "$tag" in *-*) echo "prerelease=true" ;; *) echo "prerelease=false" ;; esac >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Test
+        run: |
+          uv sync --extra dev
+          uv run pytest -m "not corpus"
+
+      # Mirrors `just build`.
+      - name: Build
+        run: |
+          cd web && pnpm install --frozen-lockfile && pnpm build && cd ..
+          rm -rf ccm/_web dist
+          cp -r web/dist ccm/_web
+          uv build
+
+      - name: Smoke-test the wheel
+        run: packaging/smoke-test.sh dist/*.whl
+
+      - name: Checksums
+        run: |
+          cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+
+      - name: Compose the release notes
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: packaging/release-notes.sh "${{ steps.meta.outputs.tag }}" > notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.meta.outputs.tag }}" \
+            --title "ccm ${{ steps.meta.outputs.version }}" \
+            --notes-file notes.md \
+            --verify-tag \
+            ${{ steps.meta.outputs.prerelease == 'true' && '--prerelease' || '--latest' }} \
+            dist/*

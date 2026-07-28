@@ -59,6 +59,8 @@ class Engine:
         self._stop = threading.Event()
         self._worker: threading.Thread | None = None
         self._watchers: list = []
+        self._watch_lock = threading.Lock()
+        self._watch_requested = False
 
         self._generation = 0
         self._broadcast_generation = -1
@@ -71,15 +73,24 @@ class Engine:
     # -- lifecycle ---------------------------------------------------------
 
     def start(self, *, watch: bool = True) -> None:
+        """Return immediately; every filesystem touch happens on the worker.
+
+        The caller is the ASGI lifespan, which runs before the server binds its
+        socket and on the event loop thread. Registering the watches here would
+        hold the port closed for the length of a recursive walk of every corpus
+        -- and, because uvicorn's signal handler only sets a flag for the loop
+        to notice, would make Ctrl-C do nothing until that walk finished.
+        """
+        self._watch_requested = watch
         self._worker = threading.Thread(target=self._run, name="ccm-scan", daemon=True)
         self._worker.start()
-        if watch:
-            self._start_watcher()
 
     def stop(self) -> None:
         self._stop.set()
         self._wake.set()
-        for watcher in self._watchers:
+        with self._watch_lock:
+            watchers = list(self._watchers)
+        for watcher in watchers:
             watcher.stop()
         if self._worker is not None:
             self._worker.join(timeout=5)
@@ -96,6 +107,8 @@ class Engine:
 
         roots = self.scanner.watch_roots
         for index, root in enumerate(roots):
+            if self._stop.is_set():
+                return
             watcher = SessionWatcher(
                 root,
                 on_change=self.request_scan,
@@ -103,7 +116,13 @@ class Engine:
                 poll_interval=self.settings.poll_seconds if index == 0 else 0,
             )
             watcher.start()
-            self._watchers.append(watcher)
+            with self._watch_lock:
+                # ``stop`` may have taken its copy of the list while this root
+                # was still being registered, so a late arrival stops itself.
+                if self._stop.is_set():
+                    watcher.stop()
+                    return
+                self._watchers.append(watcher)
 
     def request_scan(self) -> None:
         """Ask the worker to make another pass as soon as it can."""
@@ -132,6 +151,11 @@ class Engine:
     # -- worker ------------------------------------------------------------
 
     def _run(self) -> None:
+        if self._watch_requested:
+            try:
+                self._start_watcher()
+            except Exception:
+                log.exception("watch setup failed; falling back to the scan heartbeat")
         try:
             self._pass(initial=True)
         except Exception:
@@ -170,8 +194,15 @@ class Engine:
                 self._broadcast_scan(progress, throttle=True)
 
         progress = self.scanner.scan_once(
-            on_progress=on_progress, phase="scanning" if initial else "updating"
+            on_progress=on_progress,
+            phase="scanning" if initial else "updating",
+            should_stop=self._stop.is_set,
         )
+        if self._stop.is_set():
+            # Rolling up on the way out would undo the point of the early
+            # return above: the rows are committed and the next start rebuilds
+            # from them, so there is nothing here worth delaying shutdown for.
+            return
         self._refresh_derived(force=changed["any"] or initial)
         self._broadcast_scan(progress, force=True)
         self._broadcast_data(force=True)
