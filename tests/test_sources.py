@@ -1251,8 +1251,8 @@ def test_cursor_agent_captures_from_live_root(tmp_path, store):
     assert row["dk"] == "inv-live"
     assert row["model"] == "claude-opus-5"
     assert row["input_tokens"] == 9000
-    # The cache was populated by plan().
-    assert (cache / "session-live-1.log").exists()
+    # The cache was populated by plan(), prefixed with the uid dir name.
+    assert (cache / "cursor-agent-logs-1000_session-live-1.log").exists()
 
 
 def test_cursor_agent_capture_is_idempotent(tmp_path):
@@ -1266,3 +1266,27 @@ def test_cursor_agent_capture_is_idempotent(tmp_path):
     cache = tmp_path / "cache"
     assert capture_live_logs(cache, tmp_path) == 1
     assert capture_live_logs(cache, tmp_path) == 0  # already up to date
+
+
+def test_cursor_agent_resumes_model_from_carry_across_scans(tmp_path, store):
+    """A completion whose create was consumed in a prior scan still resolves model."""
+    from ccm.sources.cursor_agent import CursorAgentSource
+
+    log_dir = tmp_path / "ca"
+    log_dir.mkdir()
+    log = log_dir / "session-resume.log"
+    # First scan: write only the create event. No request emitted yet.
+    log.write_text(_ca_create("inv-resume", model="grok-4.5") + "\n")
+    src = CursorAgentSource(log_dir, live_root=tmp_path / "none")
+    Scanner(store, sources=[src]).scan_once()
+    assert rows(store, "cursor_agent") == []
+
+    # Append the matching completion. The create is now before the saved
+    # offset, so the parser must recover the model from the carry column.
+    with open(log, "a") as fh:
+        fh.write(_ca_completed("inv-resume", 5000) + "\n")
+    Scanner(store, sources=[src]).scan_once()
+    (row,) = rows(store, "cursor_agent")
+    assert row["dk"] == "inv-resume"
+    assert row["model"] == "grok-4.5"
+    assert row["input_tokens"] == 5000

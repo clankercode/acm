@@ -41,14 +41,22 @@ Durability -- ``/tmp`` rotates these logs (a newest-50 cap and ~7-day window),
 so reading ``/tmp`` directly would lose history on the next rescan. Instead the
 source keeps a stable mirror under ``~/.cache/ccm/cursor-logs/`` and reads that.
 The mirror is refreshed by :func:`capture_live_logs`, which runs at the top of
-:meth:`CursorAgentSource.plan` -- so no external daemon or hook is required:
-CCM's own inotify watcher (the live dir is in :attr:`watch_roots`) wakes the
-scanner, which captures then ingests. An optional cursor-agent ``sessionEnd``
-hook (see docs) closes the gap further for anyone who wants closer-to-realtime
-capture, but nothing depends on it. Capture is idempotent and inode-stable (it
-truncates-and-rewrites an existing mirror in place, so the byte-offset cursor
-is not reset), and re-ingestion is harmless regardless because every write is
-an upsert keyed on ``invocationID``.
+:meth:`CursorAgentSource.plan` -- so no external daemon or hook is required.
+The capture is driven by CCM's poll fallback (every ``poll_seconds``, default
+2s): the inotify watcher only fires on ``.jsonl``/``.db`` files, and
+cursor-agent logs are ``.log``, so the live dir is in :attr:`watch_roots` for
+completeness but does not itself trigger a scan. An optional cursor-agent
+``sessionEnd`` hook (see docs) closes the latency gap further for anyone who
+wants closer-to-realtime capture, but nothing depends on it. Capture is
+idempotent and inode-stable (it truncates-and-rewrites an existing mirror in
+place, so the byte-offset cursor is not reset), and re-ingestion is harmless
+regardless because every write is an upsert keyed on ``invocationID``.
+
+The create→completed join is scoped per-file: a completion whose create landed
+in a *different* session log resolves ``model = None``. In practice create and
+completed for one invocation always co-locate (same session, same process), so
+this is not a data-loss path, but it is a deliberate scoping choice noted here
+so it is not mistaken for a global join.
 """
 
 from __future__ import annotations
@@ -71,8 +79,6 @@ from .base import (
 
 #: Where cursor-agent writes rotating debug logs. One directory per uid.
 LIVE_ROOT = Path("/tmp")
-#: Mirror kept out of ``/tmp``'s reach so history survives rescans.
-DEFAULT_CACHE_DIR = Path.home() / ".cache" / "ccm" / "cursor-logs"
 
 #: Cheap pre-filter: only analytics lines about a request can yield usage.
 _MARKER = b"analytics.track"
@@ -119,7 +125,10 @@ def capture_live_logs(cache_dir: Path, live_root: Path = LIVE_ROOT) -> int:
             live_size = live.stat().st_size
         except OSError:
             continue
-        dest = cache_dir / live.name
+        # Prefix the uid dir name to avoid collisions across per-uid dirs
+        # (each process restarts its session counter, so two uid dirs can
+        # produce a session-<ts>-<n>.log with the same basename).
+        dest = cache_dir / f"{live.parent.name}_{live.name}"
         try:
             dest_size = dest.stat().st_size if dest.exists() else -1
         except OSError:
@@ -141,13 +150,7 @@ def _ts_from_prefix(line: bytes) -> int | None:
     end = line.find(b"]")
     if end <= 0:
         return None
-    raw = line[1:end].decode(errors="ignore")
-    ts = parse_ts(raw)
-    if ts is None and raw.endswith("Z"):
-        # Older fromisoformat rejected the trailing 'Z'; modern Python (3.11+)
-        # accepts it, so this only matters for the rare older build.
-        ts = parse_ts(raw[:-1] + "+00:00")
-    return ts
+    return parse_ts(line[1:end].decode(errors="ignore"))
 
 
 class CursorAgentParser:
@@ -285,13 +288,18 @@ class CursorAgentSource(JsonlSource):
     def available(self) -> bool:
         # Available once there is anything to read: either a prior capture has
         # populated the cache, or the live logs exist to be captured.
-        if self.root.exists() and any(self.root.glob("session-*.log")):
+        if self.root.exists() and any(
+            f for f in self.root.iterdir() if "session-" in f.name
+        ):
             return True
         return bool(live_session_logs(self.live_root))
 
     def iter_files(self):
-        # cursor-agent logs are ``.log``, not ``.jsonl``, so walk_jsonl's
-        # extension filter would hide them -- walk the cache dir directly.
+        # Mirror files are named ``<uid_dir>_session-*.log`` (capture_live_logs
+        # prefixes the uid dir to avoid cross-uid collisions), but matching on
+        # ``session-`` covers both prefixed mirrors and bare fixtures written
+        # straight into the cache dir in tests. cursor-agent logs are ``.log``,
+        # not ``.jsonl``, so walk_jsonl's extension filter would hide them.
         if not self.root.exists():
             return []
         found: list[Path] = []
@@ -305,7 +313,7 @@ class CursorAgentSource(JsonlSource):
             for entry in entries:
                 if entry.is_dir(follow_symlinks=False):
                     stack.append(Path(entry.path))
-                elif entry.name.startswith("session-") and entry.name.endswith(".log"):
+                elif "session-" in entry.name and entry.name.endswith(".log"):
                     found.append(Path(entry.path))
         return sorted(found)
 
