@@ -1003,6 +1003,9 @@ UNPRICED_BY_DESIGN = {
     # Not a model: the scanner could not determine one. Priced at nothing
     # because there are no tokens attached to it.
     "unknown",
+    # cursor-agent's model alias, not a real SKU. Resolves to whatever the
+    # user configured in cursor-agent, which the debug log does not record.
+    "default",
 }
 
 

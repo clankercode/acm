@@ -20,6 +20,7 @@ from ccm.scanner import Scanner
 from ccm.sources import (
     ClaudeSource,
     CopilotSource,
+    CursorAgentSource,
     GeminiSource,
     GrokSource,
     HermesSource,
@@ -959,6 +960,7 @@ def test_absent_corpora_are_skipped_not_errors(tmp_path, store):
         hermes_db=tmp_path / "nope7.db",
         copilot_db=tmp_path / "nope8.db",
         gemini_dir=tmp_path / "nope9",
+        cursor_agent_dir=tmp_path / "nope10",
         sources=(
             "codex",
             "claude",
@@ -970,6 +972,7 @@ def test_absent_corpora_are_skipped_not_errors(tmp_path, store):
             "hermes",
             "copilot",
             "gemini",
+            "cursor_agent",
         ),
         db_path=tmp_path / "db.sqlite",
         pricing_path=tmp_path / "pricing.toml",
@@ -981,7 +984,11 @@ def test_absent_corpora_are_skipped_not_errors(tmp_path, store):
         port=0,
     )
     scanner = Scanner(store, settings=settings)
-    assert scanner.sources == []
+    # cursor_agent also checks /tmp/cursor-agent-logs-* for live logs, so it
+    # may be present on a machine with cursor-agent installed; the others must
+    # all be absent when their dirs don't exist.
+    non_ca = [s for s in scanner.sources if s.name != "cursor_agent"]
+    assert non_ca == []
     assert scanner.scan_once().errors == 0
 
 
@@ -1146,3 +1153,116 @@ def test_gemini_deduplicates_on_id(tmp_path, store):
     )
     Scanner(store, sources=[GeminiSource(tmp_path / "g")]).scan_once()
     assert len(rows(store, "gemini")) == 1
+
+
+# ---------------------------------------------------------------------------
+# cursor-agent CLI
+
+
+def _write_cursor_agent_log(path, lines):
+    """Write cursor-agent debug log lines to a .log file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as fh:
+        for ln in lines:
+            fh.write(ln + "\n")
+
+
+def _ca_create(inv, model="default", mode="plan", ts="2026-07-23T15:11:18.380Z"):
+    return (
+        f'[{ts}] analytics.track {{"eventName":"cli.request.create",'
+        f'"props":{{"length":228,"model":"{model}","mode":"{mode}",'
+        f'"invocationID":"{inv}","conversationId":"conv-1"}}}}'
+    )
+
+
+def _ca_completed(inv, tokens, ts="2026-07-23T15:15:31.275Z"):
+    return (
+        f'[{ts}] analytics.track {{"eventName":"cli.request.completed",'
+        f'"props":{{"end_reason":"success","estimated_tokens":{tokens},'
+        f'"invocationID":"{inv}","conversationId":"conv-1"}}}}'
+    )
+
+
+def test_cursor_agent_joins_create_and_completed(tmp_path, store):
+    """The model comes from create, tokens from completed, joined on invocationID."""
+    _write_cursor_agent_log(
+        tmp_path / "ca" / "session-2026-07-23T15-09-31-860Z-2988402-1.log",
+        [
+            _ca_create("inv-001", model="grok-4.5"),
+            _ca_completed("inv-001", 78231),
+        ],
+    )
+    # live_root pointing nowhere so plan()'s capture is a no-op; the fixture
+    # was written straight into the cache dir.
+    Scanner(
+        store,
+        sources=[CursorAgentSource(tmp_path / "ca", live_root=tmp_path / "none")],
+    ).scan_once()
+    (row,) = rows(store, "cursor_agent")
+    assert row["dk"] == "inv-001"
+    assert row["model"] == "grok-4.5"
+    assert row["input_tokens"] == 78231
+    assert row["output_tokens"] == 0
+
+
+def test_cursor_agent_completed_without_create_emits_model_none(tmp_path, store):
+    """A completion with no matching create still records the token count."""
+    _write_cursor_agent_log(
+        tmp_path / "ca" / "session-test.log",
+        [_ca_completed("orphan-001", 500)],
+    )
+    Scanner(
+        store,
+        sources=[CursorAgentSource(tmp_path / "ca", live_root=tmp_path / "none")],
+    ).scan_once()
+    (row,) = rows(store, "cursor_agent")
+    assert row["dk"] == "orphan-001"
+    assert row["model"] is None
+    assert row["input_tokens"] == 500
+
+
+def test_cursor_agent_deduplicates_on_invocation_id(tmp_path, store):
+    """Same invocationID in two session logs collapses to one request."""
+    log = tmp_path / "ca" / "session-dup.log"
+    lines = [_ca_create("inv-dup", model="grok-4.5"), _ca_completed("inv-dup", 1000)]
+    _write_cursor_agent_log(log, lines)
+    src = CursorAgentSource(tmp_path / "ca", live_root=tmp_path / "none")
+    # Second scan re-reads; upsert is idempotent.
+    Scanner(store, sources=[src]).scan_once()
+    Scanner(store, sources=[src]).scan_once()
+    assert len(rows(store, "cursor_agent")) == 1
+
+
+def test_cursor_agent_captures_from_live_root(tmp_path, store):
+    """plan() mirrors new /tmp logs into the stable cache before ingesting."""
+    live = tmp_path / "cursor-agent-logs-1000"
+    live.mkdir(parents=True)
+    live_log = live / "session-live-1.log"
+    live_log.write_text(
+        _ca_create("inv-live", model="claude-opus-5") + "\n"
+        + _ca_completed("inv-live", 9000)
+        + "\n"
+    )
+    cache = tmp_path / "cache"
+    src = CursorAgentSource(cache, live_root=tmp_path)
+    assert src.available()
+    Scanner(store, sources=[src]).scan_once()
+    (row,) = rows(store, "cursor_agent")
+    assert row["dk"] == "inv-live"
+    assert row["model"] == "claude-opus-5"
+    assert row["input_tokens"] == 9000
+    # The cache was populated by plan().
+    assert (cache / "session-live-1.log").exists()
+
+
+def test_cursor_agent_capture_is_idempotent(tmp_path):
+    """Re-capturing a unchanged live log does not rewrite it."""
+    from ccm.sources.cursor_agent import capture_live_logs
+
+    live = tmp_path / "cursor-agent-logs-1000"
+    live.mkdir(parents=True)
+    live_log = live / "session-live.log"
+    live_log.write_text("data\n")
+    cache = tmp_path / "cache"
+    assert capture_live_logs(cache, tmp_path) == 1
+    assert capture_live_logs(cache, tmp_path) == 0  # already up to date

@@ -19,6 +19,7 @@ from .base import Source, Unit, UnitResult, project_label
 from .claude import ClaudeSource
 from .codex import CodexSource
 from .copilot import CopilotSource
+from .cursor_agent import CursorAgentSource
 from .gemini import GeminiSource
 from .grok import GrokSource
 from .hermes import HermesSource
@@ -31,6 +32,7 @@ __all__ = [
     "ClaudeSource",
     "CodexSource",
     "CopilotSource",
+    "CursorAgentSource",
     "GeminiSource",
     "GrokSource",
     "HermesSource",
@@ -56,6 +58,7 @@ _BUILDERS = {
     "hermes": lambda s: HermesSource(s.hermes_db),
     "copilot": lambda s: CopilotSource(s.copilot_db),
     "gemini": lambda s: GeminiSource(s.gemini_dir),
+    "cursor_agent": lambda s: CursorAgentSource(s.cursor_agent_dir),
 }
 
 

@@ -74,6 +74,7 @@ ALL_SOURCES = (
     "hermes",
     "copilot",
     "gemini",
+    "cursor_agent",
 )
 
 
@@ -119,6 +120,8 @@ class Settings:
     copilot_db: Path
     #: Gemini CLI chat sessions, one tree per project.
     gemini_dir: Path
+    #: cursor-agent debug logs, mirrored out of /tmp for durability.
+    cursor_agent_dir: Path
     #: Which of :data:`ALL_SOURCES` to scan.
     sources: tuple[str, ...]
 
@@ -172,6 +175,10 @@ class Settings:
             ),
             gemini_dir=_env_path(
                 "CCM_GEMINI_DIR", Path.home() / ".gemini" / "tmp"
+            ),
+            cursor_agent_dir=_env_path(
+                "CCM_CURSOR_AGENT_DIR",
+                Path.home() / ".cache" / "ccm" / "cursor-logs",
             ),
             sources=_env_sources("CCM_SOURCES"),
             db_path=_env_path("CCM_DB", STATE_DIR / "ccm.sqlite"),

@@ -24,6 +24,7 @@ from ccm.scanner import Scanner
 from ccm.sources import (
     ClaudeSource,
     CopilotSource,
+    CursorAgentSource,
     GeminiSource,
     GrokSource,
     HermesSource,
@@ -45,6 +46,8 @@ KIMI_CLI = Path.home() / ".kimi" / "sessions"
 HERMES = Path.home() / ".hermes" / "state.db"
 COPILOT = Path.home() / ".copilot" / "session-store.db"
 GEMINI = Path.home() / ".gemini" / "tmp"
+CURSOR_AGENT = Path("/tmp")
+CURSOR_AGENT_CACHE = Path.home() / ".cache" / "ccm" / "cursor-logs"
 REPO_PRICING = Path(__file__).resolve().parent.parent / "pricing.toml"
 
 pytestmark = [
@@ -60,6 +63,7 @@ pytestmark = [
             or HERMES.exists()
             or COPILOT.exists()
             or GEMINI.exists()
+            or bool(list(CURSOR_AGENT.glob("cursor-agent-logs-*")))
         ),
         reason="no non-Codex client histories on this machine",
     ),
@@ -86,6 +90,8 @@ def available_sources():
         sources.append(CopilotSource(COPILOT))
     if GEMINI.exists():
         sources.append(GeminiSource(GEMINI))
+    if list(CURSOR_AGENT.glob("cursor-agent-logs-*")):
+        sources.append(CursorAgentSource(CURSOR_AGENT_CACHE))
     return sources
 
 
@@ -856,3 +862,79 @@ def test_rescanning_an_unchanged_corpus_adds_nothing(scanned):
         assert (after["n"], after["i"]) == (before["n"], before["i"])
     else:
         assert after["n"] >= before["n"]
+
+
+# ---------------------------------------------------------------------------
+# cursor-agent CLI — independent reimplementation over the live /tmp logs
+
+
+def reference_cursor_agent():
+    """A deliberately naive reader for cursor-agent debug logs in ``/tmp``.
+
+    Scans every ``session-*.log`` under ``cursor-agent-logs-*``, joins
+    ``cli.request.create`` (model) with ``cli.request.completed`` (tokens) on
+    ``invocationID``, and deduplicates. Shares no code with the reader under
+    test.
+    """
+    rows: dict[str, tuple] = {}
+    models: dict[str, str | None] = {}
+    raw = 0
+    for d in sorted(CURSOR_AGENT.glob("cursor-agent-logs-*")):
+        if not d.is_dir():
+            continue
+        for f in sorted(d.iterdir()):
+            if not f.name.startswith("session-") or not f.name.endswith(".log"):
+                continue
+            try:
+                text = f.read_text()
+            except OSError:
+                continue
+            for line in text.splitlines():
+                if "analytics.track" not in line or "cli.request." not in line:
+                    continue
+                brace = line.find("{")
+                if brace == -1:
+                    continue
+                try:
+                    obj = json.loads(line[brace:])
+                except ValueError:
+                    continue
+                name = obj.get("eventName")
+                props = obj.get("props")
+                if not isinstance(props, dict):
+                    continue
+                inv = props.get("invocationID")
+                if not inv:
+                    continue
+                if name == "cli.request.create":
+                    models[inv] = props.get("model")
+                elif name == "cli.request.completed":
+                    raw += 1
+                    rows[str(inv)] = (
+                        int(props.get("estimated_tokens") or 0),
+                        models.get(inv),
+                    )
+    return {"requests": rows, "raw": raw}
+
+
+@pytest.mark.skipif(
+    not list(CURSOR_AGENT.glob("cursor-agent-logs-*")),
+    reason="no cursor-agent debug logs in /tmp",
+)
+def test_cursor_agent_matches_an_independent_implementation(scanned):
+    """The gate: identical deduped requests, same token counts."""
+    store, _, _ = scanned
+    reference = reference_cursor_agent()
+    ours = {
+        r["dk"]: r
+        for r in store.query("SELECT * FROM requests WHERE source = 'cursor_agent'")
+    }
+
+    assert len(ours) == len(reference["requests"]), (
+        f"{len(ours)} rows vs {len(reference['requests'])} reference"
+    )
+    assert set(ours) == set(reference["requests"])
+    for key, (tokens, model) in reference["requests"].items():
+        mine = ours[key]
+        assert mine["input_tokens"] == tokens, key
+        assert mine["model"] == model, key
