@@ -135,7 +135,7 @@ def test_shipped_rates_match_the_published_figures():
     sol = table.get("gpt-5.6-sol")
     assert (sol.short.input, sol.short.cached_input, sol.short.output) == (5.0, 0.5, 30.0)
     assert (sol.long.input, sol.long.cached_input, sol.long.output) == (10.0, 1.0, 45.0)
-    assert sol.threshold == 200_000
+    assert sol.threshold == 272_000
 
     terra = table.get("gpt-5.6-terra")
     assert (terra.short.input, terra.short.output) == (2.5, 15.0)
