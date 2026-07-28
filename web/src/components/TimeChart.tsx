@@ -5,6 +5,7 @@ import { useElementWidth } from '../lib/live'
 import { fill, type Palette } from '../lib/palette'
 import { timeLabel } from '../lib/format'
 import { ChartTooltip } from './ChartTooltip'
+import { ChartLegend } from './ChartLegend'
 
 export interface TimeSeries {
   key: string
@@ -287,6 +288,25 @@ export function TimeChart({
     )
   }
 
+  const legendItems = useMemo(
+    () =>
+      series.map((s) => {
+        const last = lastValue(s.values)
+        return {
+          key: s.key,
+          label: s.label,
+          color: s.color,
+          value: last == null ? undefined : format(last),
+          hidden: hidden.has(s.key),
+        }
+      }),
+    // `format` is a fresh closure on most renders, so it is deliberately not a
+    // dependency: it is keyed to the chart's unit, which does not change under a
+    // mounted chart.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [series, hidden],
+  )
+
   const toggle = (key: string) =>
     setHidden((prev) => {
       const next = new Set(prev)
@@ -297,28 +317,15 @@ export function TimeChart({
 
   return (
     <div>
-      {series.length > 1 && (
-        <div className="legend" role="list">
-          {series.map((s) => {
-            const last = lastValue(s.values)
-            return (
-              <button
-                key={s.key}
-                type="button"
-                role="listitem"
-                className="legend-item"
-                aria-pressed={!hidden.has(s.key)}
-                onClick={() => toggle(s.key)}
-                title={`Toggle ${s.label}`}
-              >
-                <span className="swatch" style={{ background: s.color }} />
-                {s.label}
-                {last != null && <span className="val">{format(last)}</span>}
-              </button>
-            )
-          })}
-        </div>
-      )}
+      {/* Drawn even for a single series, and always the same height: two charts
+          side by side whose legends differ in length would otherwise start their
+          plots at different heights. */}
+      <ChartLegend
+        items={legendItems}
+        onToggle={toggle}
+        onOnly={(key) => setHidden(new Set(series.filter((s) => s.key !== key).map((s) => s.key)))}
+        onShowAll={() => setHidden(new Set())}
+      />
       <div className="chart-wrap" ref={wrapRef}>
         {hasData ? (
           <>

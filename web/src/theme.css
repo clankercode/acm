@@ -737,19 +737,53 @@ input.inline-name:hover { border-color: var(--border); }
 .u-title, .u-legend { display: none; }
 .u-select { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 
-/* Names, not figures, and there can be ten of them: narrow and condensed so a
-   full legend fits above the plot instead of pushing a second and third line
-   between the title and the chart. The values keep the mono face below. */
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px var(--space-3);
+/* Two rows, always, whether the chart has one series or eleven: an equal block
+   above every plot is what lets two panels in a row line up. The overflow is not
+   dropped, it moves into the picker behind "+N more".
+   Names take the proportional face -- ten model names in mono do not fit, and
+   condensing them enough to fit made them hard to read. Figures stay mono. */
+.legend-block {
+  position: relative;
   padding-block-end: var(--space-2);
   font: var(--type-data);
   font-family: var(--font-narrow);
-  font-stretch: 80%;
-  letter-spacing: .01em;
 }
+
+.legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 2px var(--space-3);
+  /* Two item heights plus the row gap, where an item is its line box plus its
+     1px of padding either side. Fixed rather than min, so a legend that wants a
+     third row is held to the deal it was given -- and exact, or the second row
+     is clipped by the couple of pixels the padding adds. */
+  height: calc(2 * (1.125rem + 2px) + 2px);
+  overflow: hidden;
+}
+
+/* Kept out of the flow: it exists to be measured, not seen. */
+.legend-sizer {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.legend-more {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  cursor: pointer;
+  border: 0;
+  border-block-end: var(--rule) dotted var(--border-strong);
+  background: none;
+  padding: 1px 0;
+  font: inherit;
+  line-height: 1.125rem;
+  white-space: nowrap;
+}
+.legend-more:hover { color: var(--text-primary); }
 
 .legend-item {
   display: inline-flex;
@@ -761,15 +795,94 @@ input.inline-name:hover { border-color: var(--border); }
   background: none;
   padding: 1px 0;
   font: inherit;
+  /* Stated, so the row height above is arithmetic rather than a guess about how
+     a swatch and a name resolve their line box. */
+  line-height: 1.125rem;
+  /* An item's width must not depend on the width of the box it is packed into,
+     or a remembered width stops being true when the panel narrows. */
+  white-space: nowrap;
 }
 .legend-item[aria-pressed='false'] { opacity: .35; }
 /* Back to mono: these are numbers, and they sit under each other as the legend
    wraps. */
-.legend-item .val {
+.legend-item .val,
+.series-row .val {
   color: var(--text-muted);
   font-family: var(--mono);
-  font-stretch: normal;
 }
+
+/* The overflow's home: everything the legend could not fit, with room for the
+   one action a row of names cannot offer -- looking at a single series. */
+.series-picker {
+  position: absolute;
+  z-index: 30;
+  inset-inline-start: 0;
+  top: 100%;
+  min-width: 240px;
+  max-width: min(420px, 100%);
+  background: var(--page);
+  border: var(--rule) solid var(--border-strong);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
+.series-picker-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border-block-end: var(--rule) solid var(--border);
+}
+
+.series-picker-list {
+  max-height: 15rem;
+  overflow-y: auto;
+  overscroll-behavior-y: auto;
+}
+
+.series-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-inline: var(--space-2);
+}
+.series-row:hover { background: var(--surface-2); }
+
+.series-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: var(--space-1) 0;
+  font: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: start;
+}
+.series-toggle[aria-pressed='false'] { opacity: .4; }
+.series-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.series-only {
+  border: 0;
+  background: none;
+  padding: var(--space-1);
+  font: var(--type-label);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+}
+.series-row:hover .series-only,
+.series-only:focus-visible { opacity: 1; }
+.series-only:hover { color: var(--accent); }
 
 .tooltip {
   position: absolute;
