@@ -191,6 +191,8 @@ class Updater:
         Any page in any tab can POST to ``http://localhost:8808/api/update`` --
         no token, no CORS preflight for a simple request -- and the update runs.
         That is the realistic attack on this endpoint, not someone on the LAN.
+        Applied to every write in the API, not only to this one: the same tab
+        could as easily delete an imported machine.
 
         ``Sec-Fetch-Site`` is the defence, because it is set by the browser and
         cannot be set by the page. Absent means the caller is not a browser at

@@ -162,6 +162,22 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
     # rides along on every snapshot and every stream reconnect.
     app.state.build = build_identity()
 
+    @app.middleware("http")
+    async def refuse_cross_site_writes(request: Request, call_next):
+        """No page from another site gets to change anything here.
+
+        Found while thinking about the update endpoint, but it is not special:
+        the dashboard has no authentication, so a page in any tab could POST to
+        localhost and delete an imported machine or rewrite the rate table.
+        Reads are left alone -- they are already public to anything that can
+        reach the port, and this is not authentication.
+        """
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            refusal = Updater.cross_site_problem(request.headers)
+            if refusal:
+                return JSONResponse({"detail": refusal}, status_code=403)
+        return await call_next(request)
+
     def snapshot() -> dict:
         """The engine's view plus which build served it."""
         return {**engine.snapshot(), "build": app.state.build}

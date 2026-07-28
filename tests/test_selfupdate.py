@@ -176,3 +176,20 @@ def test_the_endpoint_reports_why_it_cannot_update(base):
         assert body["available"] is False
         assert "CCM_CHECKOUT" in body["reason"]
         assert client.post("/api/update").status_code == 409
+
+
+def test_no_write_endpoint_accepts_a_cross_site_request(base, tmp_path):
+    """The guard is not the update button's alone.
+
+    A page in another tab could just as easily delete an imported machine or
+    rewrite the rate table, and none of those endpoints authenticate either.
+    """
+    app = create_app(base, watch=False)
+    with TestClient(app, client=("127.0.0.1", 9999)) as client:
+        evil = {"sec-fetch-site": "cross-site"}
+        assert client.post("/api/rescan", headers=evil).status_code == 403
+        assert client.post("/api/scan/pause", headers=evil).status_code == 403
+        assert client.delete("/api/machines/somebody", headers=evil).status_code == 403
+        # Reads are untouched: they are already public to anything that can
+        # reach the port, and this is not a login.
+        assert client.get("/api/state", headers=evil).status_code == 200
