@@ -20,6 +20,7 @@ from ccm.scanner import Scanner
 from ccm.sources import (
     ClaudeSource,
     GrokSource,
+    KimiCliSource,
     KimiCodeSource,
     OpenCodeSource,
     PiSource,
@@ -600,6 +601,55 @@ def test_kimi_code_resumes_mid_file(tmp_path, store, clock):
     scanner.scan_once()
     got = {r["dk"]: r for r in rows(store, "kimi_code")}
     assert set(got) == {"r1", "r2"}
+
+
+# ---------------------------------------------------------------------------
+# Kimi CLI
+
+
+def test_kimi_cli_reassembles_the_whole_prompt(tmp_path, store, clock):
+    from .conftest import KimiCliWire
+
+    root = tmp_path / "kl"
+    KimiCliWire("kl1", clock).request(
+        fresh=400, cache_read=20_000, cache_write=3_000, output=300, message_id="m1"
+    ).write(root)
+
+    Scanner(store, sources=[KimiCliSource(root)]).scan_once()
+    (row,) = rows(store, "kimi_cli")
+    assert row["input_tokens"] == 23_400
+    assert row["cached_tokens"] == 20_000
+    assert row["cache_write_tokens"] == 3_000
+    assert row["output_tokens"] == 300
+
+
+def test_kimi_cli_records_no_model(tmp_path, store, clock):
+    """The wire log never names a model; the row is unpriced by design."""
+    from .conftest import KimiCliWire
+
+    root = tmp_path / "kl"
+    KimiCliWire("kl1", clock).request(
+        fresh=10, cache_read=10, output=5, message_id="m2"
+    ).write(root)
+
+    Scanner(store, sources=[KimiCliSource(root)]).scan_once()
+    (row,) = rows(store, "kimi_cli")
+    assert row["model"] is None
+
+
+def test_kimi_cli_ingest_is_idempotent(tmp_path, store, clock):
+    from .conftest import KimiCliWire
+
+    root = tmp_path / "kl"
+    KimiCliWire("kl1", clock).request(
+        fresh=10, cache_read=10, output=5, message_id="r1"
+    ).write(root)
+
+    scanner = Scanner(store, sources=[KimiCliSource(root)])
+    scanner.scan_once()
+    store.reset_file(store.query("SELECT path FROM files")[0]["path"])
+    scanner.scan_once()
+    assert len(rows(store, "kimi_cli")) == 1
 
 
 # ---------------------------------------------------------------------------

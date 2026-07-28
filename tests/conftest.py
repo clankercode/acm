@@ -718,6 +718,75 @@ class KimiCodeWire:
         return path
 
 
+@dataclass
+class KimiCliWire:
+    """Builds one Kimi CLI session wire log.
+
+    Kimi CLI is a different product from Kimi Code: usage lands on
+    ``StatusUpdate`` messages with snake_case token_usage keys, and no model is
+    recorded anywhere.
+    """
+
+    session_id: str
+    clock: datetime
+    lines: list[str] = field(default_factory=list)
+
+    def advance(self, seconds: float = 1.0) -> None:
+        self.clock += timedelta(seconds=seconds)
+
+    def _emit(self, obj: dict) -> None:
+        self.lines.append(json.dumps(obj, separators=(",", ":")))
+
+    def request(
+        self,
+        *,
+        fresh: int,
+        cache_read: int,
+        output: int,
+        cache_write: int = 0,
+        message_id: str | None = None,
+    ) -> KimiCliWire:
+        self.advance(2)
+        ts = self.clock.timestamp()
+        self._emit(
+            {
+                "timestamp": ts,
+                "message": {
+                    "type": "StatusUpdate",
+                    "payload": {
+                        "token_usage": {
+                            "input_other": fresh,
+                            "output": output,
+                            "input_cache_read": cache_read,
+                            "input_cache_creation": cache_write,
+                        },
+                        "message_id": message_id
+                        or f"chatcmpl-{uuid.uuid4().hex[:18]}",
+                    },
+                },
+            }
+        )
+        return self
+
+    def chatter(self) -> KimiCliWire:
+        """A non-StatusUpdate line, which the reader must skip."""
+        self.advance(1)
+        self._emit(
+            {
+                "timestamp": self.clock.timestamp(),
+                "message": {"type": "StepBegin", "payload": {}},
+            }
+        )
+        return self
+
+    def write(self, root: Path) -> Path:
+        d = root / uuid.uuid4().hex[:16] / self.session_id
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / "wire.jsonl"
+        path.write_text("".join(line + "\n" for line in self.lines))
+        return path
+
+
 @pytest.fixture
 def sessions_dir(tmp_path: Path) -> Path:
     d = tmp_path / "sessions" / "2026" / "07" / "01"

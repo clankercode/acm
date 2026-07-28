@@ -24,6 +24,7 @@ from ccm.scanner import Scanner
 from ccm.sources import (
     ClaudeSource,
     GrokSource,
+    KimiCliSource,
     KimiCodeSource,
     OpenCodeSource,
     PiSource,
@@ -37,6 +38,7 @@ PI = Path.home() / ".pi" / "agent" / "sessions"
 OPENCODE = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
 GROK = Path.home() / ".grok" / "sessions"
 KIMI_CODE = Path.home() / ".kimi-code" / "sessions"
+KIMI_CLI = Path.home() / ".kimi" / "sessions"
 REPO_PRICING = Path(__file__).resolve().parent.parent / "pricing.toml"
 
 pytestmark = [
@@ -48,6 +50,7 @@ pytestmark = [
             or OPENCODE.exists()
             or GROK.exists()
             or KIMI_CODE.exists()
+            or KIMI_CLI.exists()
         ),
         reason="no non-Codex client histories on this machine",
     ),
@@ -66,6 +69,8 @@ def available_sources():
         sources.append(GrokSource(GROK))
     if KIMI_CODE.exists():
         sources.append(KimiCodeSource(KIMI_CODE))
+    if KIMI_CLI.exists():
+        sources.append(KimiCliSource(KIMI_CLI))
     return sources
 
 
@@ -496,6 +501,71 @@ def test_kimi_code_matches_an_independent_implementation(scanned):
     ours = {
         row["dk"]: row
         for row in store.query("SELECT * FROM requests WHERE source = 'kimi_code'")
+    }
+
+    assert len(ours) == len(reference["requests"])
+    assert set(ours) == set(reference["requests"])
+    for key, ref in reference["requests"].items():
+        mine = ours[key]
+        assert mine["input_tokens"] == ref[0], key
+        assert mine["cached_tokens"] == ref[1], key
+        assert mine["cache_write_tokens"] == ref[2], key
+        assert mine["output_tokens"] == ref[3], key
+
+
+def reference_kimi_cli(offsets: dict[str, int]) -> dict:
+    """A second, deliberately naive implementation of the Kimi CLI rules."""
+    rows: dict[str, tuple] = {}
+    raw = 0
+    for path, limit in offsets.items():
+        with open(path, "rb") as fh:
+            data = fh.read(limit)
+        for line in data.split(b"\n"):
+            if b'"StatusUpdate"' not in line or not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            message = obj.get("message") or {}
+            if message.get("type") != "StatusUpdate":
+                continue
+            payload = message.get("payload") or {}
+            usage = payload.get("token_usage")
+            if not isinstance(usage, dict):
+                continue
+            mid = payload.get("message_id")
+            if not mid:
+                continue
+            raw += 1
+            fresh = usage.get("input_other") or 0
+            cache_read = usage.get("input_cache_read") or 0
+            cache_write = usage.get("input_cache_creation") or 0
+            rows[mid] = (
+                fresh + cache_read + cache_write,
+                cache_read,
+                cache_write,
+                usage.get("output") or 0,
+            )
+    return {"requests": rows, "raw": raw}
+
+
+@pytest.mark.skipif(not KIMI_CLI.exists(), reason="no Kimi CLI history")
+def test_kimi_cli_matches_an_independent_implementation(scanned):
+    """The gate: identical bytes in, identical deduped requests out."""
+    store, _, _ = scanned
+    offsets = {
+        row["path"]: row["offset"]
+        for row in store.query(
+            "SELECT path, offset FROM files WHERE source = 'kimi_cli'"
+        )
+    }
+    if not offsets:
+        pytest.skip("Kimi CLI history is empty")
+    reference = reference_kimi_cli(offsets)
+    ours = {
+        row["dk"]: row
+        for row in store.query("SELECT * FROM requests WHERE source = 'kimi_cli'")
     }
 
     assert len(ours) == len(reference["requests"])
