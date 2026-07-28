@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import sys
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -207,14 +208,34 @@ def cmd_serve(args, settings) -> int:
         f"  {'database':<12}{settings.db_path}",
         f"  {'pricing':<12}{settings.pricing_path}",
     ]
-    lines += [f"  {'serving':<12}{url}" for url in local_addresses(settings.port)]
-    if settings.host == "0.0.0.0":
-        lines.append("  (bound on all interfaces)")
     # Flushed explicitly so the banner appears immediately even when stdout is
     # redirected to a file and therefore block-buffered.
     print("\n".join(lines), flush=True)
 
-    uvicorn.run(app, host=settings.host, port=settings.port, log_level=args.log_level)
+    server = uvicorn.Server(
+        uvicorn.Config(app, host=settings.host, port=settings.port, log_level=args.log_level)
+    )
+
+    # The URLs are printed by a watcher on ``server.started`` rather than up
+    # front, so they are never a promise the server has not yet kept: if the
+    # bind fails or startup stalls, no address is ever advertised.
+    finished = threading.Event()
+
+    def announce() -> None:
+        while not finished.wait(0.05):
+            if not server.started:
+                continue
+            out = [f"  {'serving':<12}{url}" for url in local_addresses(settings.port)]
+            if settings.host == "0.0.0.0":
+                out.append("  (bound on all interfaces)")
+            print("\n".join(out), flush=True)
+            return
+
+    threading.Thread(target=announce, name="ccm-announce", daemon=True).start()
+    try:
+        server.run()
+    finally:
+        finished.set()
     return 0
 
 

@@ -353,3 +353,60 @@ def test_offset_advances_only_over_complete_lines(store, sessions_dir, clock):
     offset = store.one("SELECT offset FROM files")["offset"]
     assert offset == full.rindex("\n", 0, len(full) - 3) + 1
     assert offset < os.path.getsize(path)
+
+
+def test_should_stop_ends_a_pass_between_files(store, sessions_dir, clock, tmp_path):
+    """Shutdown asks the pass to leave; what it resumes to must be identical."""
+    for i in range(4):
+        t = build(sessions_dir, clock + timedelta(hours=i), rollout_id=f"r{i}",
+                  session_id=f"s{i}")
+        t.write(sessions_dir, f"rollout-2026-07-01T1{i}-00-00-r{i}.jsonl")
+
+    root = sessions_dir.parents[2]
+    partial = Store(tmp_path / "cancelled.sqlite")
+    scanner = Scanner(partial, root)
+
+    stopping = {"now": False}
+    seen: list[int] = []
+
+    def watch(progress):
+        seen.append(progress.files_done)
+        if progress.files_done >= 2:
+            stopping["now"] = True
+
+    progress = scanner.scan_once(on_progress=watch, should_stop=lambda: stopping["now"])
+    # Left early rather than running to the end, but still parked in the
+    # resting state a subscriber can render.
+    assert progress.files_done < 4
+    assert progress.phase == "tailing"
+    mid = partial.one("SELECT COUNT(*) AS n FROM requests")["n"]
+    assert 0 < mid < 12
+
+    Scanner(partial, root).scan_once()
+    resumed = partial.one("SELECT COUNT(*) AS n FROM requests")["n"]
+    partial.close()
+
+    scan(store, sessions_dir)
+    assert resumed == store.one("SELECT COUNT(*) AS n FROM requests")["n"] == 12
+
+
+def test_cancellation_stops_a_reader_inside_a_file(store, sessions_dir, clock):
+    """A single rollout can outlast the shutdown grace period on its own."""
+    from ccm.sources.base import cancellation, read_new_lines
+
+    thread = build(sessions_dir, clock)
+    path = thread.write(sessions_dir)
+
+    fed: list[bytes] = []
+    with cancellation(lambda: True):
+        bytes_read, offset, error = read_new_lines(path, 0, fed.append)
+
+    assert fed == []
+    assert bytes_read == 0
+    assert offset == 0
+    assert error is None
+
+    # ...and with nothing asking it to stop, the same call reads the file.
+    after: list[bytes] = []
+    assert read_new_lines(path, 0, after.append)[0] == os.path.getsize(path)
+    assert after
