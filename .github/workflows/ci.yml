@@ -1,0 +1,104 @@
+name: ci
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv sync --extra dev --python ${{ matrix.python }}
+
+      # The corpus suite reads session histories that only exist on a machine
+      # somebody actually codes on, so CI runs everything else.
+      - run: uv run pytest -m "not corpus"
+
+  web:
+    name: dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+
+      - run: pnpm exec tsc -b --force
+        working-directory: web
+
+      - run: pnpm build
+        working-directory: web
+
+  package:
+    name: wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # Mirrors `just build`. The dashboard is staged inside the package so the
+      # wheel needs no build step of its own at install time.
+      - name: Build the dashboard
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build the wheel and sdist
+        run: |
+          rm -rf ccm/_web dist
+          cp -r web/dist ccm/_web
+          uv build
+
+      # A wheel that builds but cannot serve is the failure worth catching, so
+      # the built artifact is installed somewhere empty and made to run.
+      - name: Smoke-test the wheel
+        run: packaging/smoke-test.sh dist/*.whl
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error

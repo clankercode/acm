@@ -12,7 +12,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import aggregate as A, portable
-from .config import settings as default_settings
+from .config import bootstrap, settings as default_settings
 from .engine import Engine, local_addresses
 from .pricing import PricingTable
 from .scanner import Scanner
@@ -212,8 +212,18 @@ def cmd_serve(args, settings) -> int:
     # redirected to a file and therefore block-buffered.
     print("\n".join(lines), flush=True)
 
+    # An SSE stream only ends when its client goes away, so a graceful shutdown
+    # that waits for open connections waits forever on any dashboard left open
+    # -- the process would stop serving on SIGTERM and then never exit, which
+    # under systemd means every stop and restart hits the kill timeout.
     server = uvicorn.Server(
-        uvicorn.Config(app, host=settings.host, port=settings.port, log_level=args.log_level)
+        uvicorn.Config(
+            app,
+            host=settings.host,
+            port=settings.port,
+            log_level=args.log_level,
+            timeout_graceful_shutdown=5,
+        )
     )
 
     # The URLs are printed by a watcher on ``server.started`` rather than up
@@ -292,6 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.pricing:
         settings = replace(settings, pricing_path=args.pricing)
 
+    bootstrap(settings)
     return args.func(args, settings)
 
 

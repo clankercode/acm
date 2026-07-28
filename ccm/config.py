@@ -2,15 +2,41 @@
 
 Everything is overridable by environment variable so the tool can be pointed at
 a fixture corpus in tests without touching the real one.
+
+Writable state lives inside the checkout when run from one, and under the XDG
+directories when run from an installed wheel -- where the checkout's ``data/``
+would be somewhere unwritable in ``site-packages``.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PACKAGE_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = PACKAGE_ROOT.parent
+
+#: A source checkout has the build file one level above the package; an
+#: installed copy has ``site-packages`` there instead.
+DEV_LAYOUT = (PROJECT_ROOT / "pyproject.toml").is_file()
+
+#: The rate table shipped inside the wheel, copied out on first run.
+BUNDLED_PRICING = PACKAGE_ROOT / "pricing.default.toml"
+
+
+def _xdg(var: str, fallback: str) -> Path:
+    raw = os.environ.get(var)
+    return (Path(raw).expanduser() if raw else Path.home() / fallback) / "ccm"
+
+
+#: Derived state, safe to delete.
+STATE_DIR = PROJECT_ROOT / "data" if DEV_LAYOUT else _xdg("XDG_STATE_HOME", ".local/state")
+#: Things the user edits, directly or through the dashboard.
+CONFIG_DIR = PROJECT_ROOT if DEV_LAYOUT else _xdg("XDG_CONFIG_HOME", ".config")
+#: Downloaded copies of things that live upstream.
+CACHE_DIR = PROJECT_ROOT / "data" if DEV_LAYOUT else _xdg("XDG_CACHE_HOME", ".cache")
 
 
 def _env_path(name: str, default: Path) -> Path:
@@ -94,11 +120,9 @@ class Settings:
             ),
             grok_dir=_env_path("CCM_GROK_DIR", Path.home() / ".grok" / "sessions"),
             sources=_env_sources("CCM_SOURCES"),
-            db_path=_env_path("CCM_DB", PROJECT_ROOT / "data" / "ccm.sqlite"),
-            pricing_path=_env_path("CCM_PRICING", PROJECT_ROOT / "pricing.toml"),
-            reference_path=_env_path(
-                "CCM_REFERENCE", PROJECT_ROOT / "data" / "models-dev.json"
-            ),
+            db_path=_env_path("CCM_DB", STATE_DIR / "ccm.sqlite"),
+            pricing_path=_env_path("CCM_PRICING", CONFIG_DIR / "pricing.toml"),
+            reference_path=_env_path("CCM_REFERENCE", CACHE_DIR / "models-dev.json"),
             debounce_seconds=_env_float("CCM_DEBOUNCE", 0.25),
             poll_seconds=_env_float("CCM_POLL", 2.0),
             broadcast_hz=_env_float("CCM_BROADCAST_HZ", 4.0),
@@ -112,3 +136,15 @@ class Settings:
 
 
 settings = Settings.from_env()
+
+
+def bootstrap(cfg: Settings) -> None:
+    """Put a rate table where an installed copy expects to find one.
+
+    Called from the CLI rather than at import so that constructing ``Settings``
+    stays free of side effects, which the tests rely on.
+    """
+    if cfg.pricing_path.exists() or not BUNDLED_PRICING.is_file():
+        return
+    cfg.pricing_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(BUNDLED_PRICING, cfg.pricing_path)

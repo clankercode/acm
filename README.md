@@ -22,14 +22,24 @@ worse than `$20,004 / 31.6 B` ($0.63/M). Costing every client at published list
 prices is what makes that number comparable across them.
 
 ```
-uv sync
-cd web && pnpm install && pnpm build && cd ..
-uv run ccm serve
+just setup                     # uv sync, pnpm install
+just serve                     # scan, watch, serve
+```
+
+Or install it, dashboard and rate table baked into the wheel, and run it in the
+background from boot:
+
+```
+just enable                    # build, install, systemd --user, start now
+just logs
 ```
 
 The dashboard binds `0.0.0.0:8808`, so it is reachable from the LAN as well as
 loopback; the startup banner prints both URLs. Every corpus is opened
 **read-only** and never written to.
+
+`just` with no arguments lists everything; see [`just` recipes](#just-recipes)
+below for the full set, and [RELEASE.md](RELEASE.md) for the release procedure.
 
 ## Commands
 
@@ -48,6 +58,114 @@ Overrides: `--sessions`, `--db`, `--pricing`, or the environment variables
 `CCM_GROK_DIR`,
 `CCM_SOURCES`, `CCM_DB`, `CCM_PRICING`, `CCM_REFERENCE`, `CCM_HOST`, `CCM_PORT`,
 `CCM_POLL`. `CCM_SOURCES=codex,claude` restricts the scan to named clients.
+For the service, they go in `~/.config/ccm/env` — see
+[`packaging/ccm.env.example`](packaging/ccm.env.example).
+
+## `just` recipes
+
+`just` with no arguments lists all of them with a one-line description. The
+ones worth knowing by name:
+
+**Working on it from a checkout**
+
+```
+just setup                     # uv sync --extra dev; pnpm install
+just serve [args]              # uv run ccm serve
+just scan [args]                # uv run ccm scan
+just ccm <subcommand> [args]   # any ccm subcommand, e.g. just ccm export -o out.json
+just dev                       # API + Vite dev server together, hot reload, Ctrl-C stops both
+just test [args]               # the fixture suite (~5s)
+just test-corpus [args]        # the suite that reads the real corpora on this machine (~45s)
+just typecheck                 # tsc -b --force on the dashboard
+just check                     # test + typecheck + a wheel that must actually serve; what CI runs
+just clean                     # remove dist/, ccm/_web, web/dist, caches
+```
+
+**Building and installing**
+
+```
+just build-web                 # pnpm build, then stage web/dist into ccm/_web
+just build                     # build-web, then uv build -> dist/*.whl, dist/*.tar.gz
+just verify-wheel              # build, then install the wheel into a throwaway venv+HOME and prove it scans and serves
+just install                   # build, then uv tool install the wheel -> `ccm` on PATH
+just uninstall                 # uv tool uninstall (state and pricing are left alone)
+```
+
+**Running it as a service** (systemd `--user`; see next section)
+
+```
+just enable                    # install + install-service + start now + start at boot
+just disable                   # stop it and leave it stopped across boots
+just linger                    # keep it running when nobody is logged in (once per machine)
+just start / stop / restart
+just status                    # systemctl --user status ccm.service
+just logs [args]               # journalctl --user -u ccm.service -f, e.g. just logs -n 200
+just uninstall-service         # remove the unit file (leaves the installed tool alone)
+```
+
+**Updating and releasing**
+
+```
+just update                    # git pull --ff-only; setup; build; install; restart the service if it's running
+just reset                     # delete the database (rescanning rebuilds it)
+just version                   # print the version in pyproject.toml
+just bump X.Y.Z                # set the version and refresh uv.lock
+just notes                     # preview the release notes the workflow would publish
+just tag                       # release-check, then tag and push -- starts the release workflow
+```
+
+[RELEASE.md](RELEASE.md) walks through a release end to end.
+
+## Running it as a service
+
+```
+just enable
+```
+
+builds the wheel with the dashboard and rate table baked in, installs it with
+`uv tool install`, installs
+[`packaging/ccm.service`](packaging/ccm.service) as a systemd **user** unit
+(user-scoped because every corpus it reads lives under `$HOME` and needs no
+privilege beyond the login user's), and starts it now and at every future
+login. To have it come up even when nobody is logged in:
+
+```
+just linger
+```
+
+Override defaults (host, port, which clients to scan, custom corpus paths) by
+copying [`packaging/ccm.env.example`](packaging/ccm.env.example) to
+`~/.config/ccm/env` and uncommenting what you need — systemd does not expand
+`~` or `$HOME` in that file, so paths have to be written out in full.
+
+```
+just logs                      # follow it
+just restart                   # after changing ~/.config/ccm/env
+just update                     # pull, rebuild, reinstall, and restart it in one step
+```
+
+## Where it keeps things
+
+Run from a checkout, everything writable stays in the checkout: `data/ccm.sqlite`
+and the `pricing.toml` beside it. Installed, there is no checkout to write to,
+so it uses the XDG directories instead.
+
+| | checkout | installed |
+|---|---|---|
+| database, safe to delete | `data/ccm.sqlite` | `~/.local/state/ccm/ccm.sqlite` |
+| rate table, editable | `pricing.toml` | `~/.config/ccm/pricing.toml` |
+| models.dev cache | `data/models-dev.json` | `~/.cache/ccm/models-dev.json` |
+
+Which one applies is decided by whether a `pyproject.toml` sits above the
+package, so an editable install still behaves like a checkout. The installed
+copy carries the default rate table inside the wheel and writes it out the first
+time it runs, and carries the built dashboard too — `uv tool install` of the
+released wheel needs no Node and no build step.
+
+The systemd unit asks systemd for those three directories by name
+(`StateDirectory=`, `ConfigurationDirectory=`, `CacheDirectory=`), which is what
+keeps them writable under `ProtectSystem=strict`. Pointing `CCM_DB` somewhere
+else means adding a matching `ReadWritePaths=` in a drop-in.
 
 ## Several machines, one view
 
@@ -243,13 +361,16 @@ ccm/engine.py            background scan loop and SSE fan-out
 ccm/watcher.py           inotify with a polling fallback
 ccm/server.py            REST + server-sent events
 web/                     Vite + React + TypeScript + uPlot
+justfile                 setup, build, install, service, release
+packaging/               systemd unit, wheel smoke test, release notes
+.github/workflows/       tests on three Pythons; tagged builds become releases
 ```
 
 Adding a client means writing one file under `ccm/sources/` — `plan()` lists the
 units with work outstanding, `ingest()` consumes one — and registering it. The
 scanner treats them identically and reports progress per client.
 
-All state lives in one SQLite file (`data/ccm.sqlite` by default). Deleting it
+All state lives in one SQLite file. Deleting it
 and rescanning reproduces it exactly; a schema version bump does that
 automatically rather than migrating, since nothing here is a source of truth.
 
@@ -296,8 +417,9 @@ that existed at start-up and each new day creates one.
 ## Tests
 
 ```
-uv run pytest                 # 154 unit and integration tests, ~5s
-uv run pytest -m corpus       # 28 tests against the real corpora, ~44s
+just test                     # 154 unit and integration tests, ~5s
+just test-corpus              # 28 tests against the real corpora, ~44s
+just check                    # what CI runs: tests, tsc, and a wheel that must serve
 ```
 
 The corpus suites are the real gate. Because the corpora are live — files grow

@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import aggregate as A, portable
-from .config import Settings, settings as default_settings
+from .config import PACKAGE_ROOT, PROJECT_ROOT, Settings, settings as default_settings
 from .engine import Engine
 
 
@@ -28,7 +28,16 @@ def version(name: str) -> str:
 
 log = logging.getLogger("ccm.server")
 
-WEB_DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
+def web_dist() -> Path | None:
+    """The built dashboard: the checkout's copy first, then the wheel's.
+
+    Preferring ``web/dist`` means a developer running ``pnpm build`` sees the
+    result without also having to refresh the copy baked into the package.
+    """
+    for candidate in (PROJECT_ROOT / "web" / "dist", PACKAGE_ROOT / "_web"):
+        if (candidate / "index.html").is_file():
+            return candidate
+    return None
 
 
 class ORJSONResponse(JSONResponse):
@@ -361,15 +370,15 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
 
     # -- static -------------------------------------------------------------
 
-    if WEB_DIST.exists():
-        app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="web")
+    dist = web_dist()
+    if dist is not None:
+        app.mount("/", StaticFiles(directory=dist, html=True), name="web")
     else:
 
         @app.get("/")
         def missing_ui() -> Response:
             return Response(
-                "The web UI has not been built yet.\n\n"
-                "  cd web && pnpm install && pnpm build\n",
+                "The web UI has not been built yet.\n\n  just build-web\n",
                 media_type="text/plain",
                 status_code=503,
             )

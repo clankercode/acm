@@ -1,0 +1,59 @@
+; Agent Cache Monitor, as a systemd *user* service.
+;
+;   just enable          install this file, start it, and start it at boot
+;   just linger          keep it running when nobody is logged in
+;
+; A user service is the right scope: every corpus it reads lives under $HOME,
+; and it needs no privilege the login user does not already have.
+;
+; Installed by hand instead:
+;   install -m 644 packaging/ccm.service ~/.config/systemd/user/
+;   systemctl --user daemon-reload && systemctl --user enable --now ccm.service
+
+[Unit]
+Description=Agent Cache Monitor
+Documentation=https://github.com/xertrov/codex-cache-monitor
+After=network.target
+
+[Service]
+Type=exec
+; `just install` puts the executable here. Point this at
+; `%h/src/codex-cache-monitor/.venv/bin/ccm` to run a checkout instead.
+ExecStart=%h/.local/bin/ccm serve
+SyslogIdentifier=ccm
+
+; Settings go here, one KEY=value per line: CCM_PORT, CCM_HOST, CCM_SOURCES,
+; CCM_DB, CCM_PRICING, ... The leading `-` makes the file optional.
+EnvironmentFile=-%E/ccm/env
+Environment=PYTHONUNBUFFERED=1
+
+Restart=on-failure
+RestartSec=5s
+; A scan of a large corpus can take a while before the port opens.
+TimeoutStartSec=300
+; ccm gives open dashboards 5s to let go on SIGTERM; this is the backstop.
+TimeoutStopSec=20
+
+; systemd creates these and keeps them writable under ProtectSystem=strict.
+; They are exactly the paths ccm defaults to when it is not run from a
+; checkout: ~/.local/state/ccm, ~/.cache/ccm and ~/.config/ccm.
+StateDirectory=ccm
+CacheDirectory=ccm
+ConfigurationDirectory=ccm
+
+; The session corpora stay readable -- ProtectHome would hide them, and every
+; one of them is opened read-only anyway -- but nothing else is writable.
+;
+; Only sandboxing an unprivileged user manager can actually apply is set here.
+; ProtectKernelTunables, ProtectKernelModules, ProtectControlGroups and
+; RestrictNamespaces all narrow the capability bounding set, which needs
+; CAP_SETPCAP; in a user unit they fail the service with 218/CAPABILITIES.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=default.target
