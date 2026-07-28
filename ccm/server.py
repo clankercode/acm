@@ -424,7 +424,9 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
 
     @app.post("/api/update")
     def post_update(request: Request) -> dict:
-        refusal = updater.may_start_from(request.client.host if request.client else None)
+        refusal = updater.may_start_from(
+            request.client.host if request.client else None
+        ) or updater.cross_site_problem(request.headers)
         if refusal:
             # 403 rather than 409: this is about who is asking, and no amount of
             # retrying from the same place will change the answer.

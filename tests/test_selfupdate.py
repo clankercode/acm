@@ -138,6 +138,35 @@ def test_the_endpoint_refuses_a_remote_caller(base, tmp_path):
         assert Updater(settings).running() is False
 
 
+def test_a_page_on_another_site_cannot_spend_the_endpoint(base, tmp_path):
+    """The attack the loopback guard cannot stop: a browser is on loopback.
+
+    Any tab can POST to http://localhost:8808/api/update -- a simple request, so
+    no preflight and no token to miss. Sec-Fetch-Site is what tells the two apart,
+    and a page cannot set it.
+    """
+    settings = replace(base, checkout_path=fake_checkout(tmp_path))
+    app = create_app(settings, watch=False)
+    with TestClient(app, client=("127.0.0.1", 9999)) as client:
+        evil = client.post("/api/update", headers={"sec-fetch-site": "cross-site"})
+        assert evil.status_code == 403
+        assert "another site" in evil.json()["detail"]
+
+        framed = client.post(
+            "/api/update",
+            headers={"origin": "http://evil.example", "host": "localhost:8808"},
+        )
+        assert framed.status_code == 403
+
+        assert Updater(settings).running() is False, "an update was started anyway"
+
+    # A caller that is not a browser sends neither header, and is allowed: this
+    # guard is not authentication, it only refuses foreign pages.
+    updater = Updater(settings)
+    assert updater.cross_site_problem({}) is None
+    assert updater.cross_site_problem({"sec-fetch-site": "same-origin"}) is None
+
+
 def test_the_endpoint_reports_why_it_cannot_update(base):
     app = create_app(base, watch=False)
     # An explicit loopback address: TestClient's default is the host "testclient",

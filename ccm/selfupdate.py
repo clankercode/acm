@@ -183,6 +183,29 @@ class Updater:
             "Set CCM_UPDATE_FROM_LAN=1 to allow them over the network"
         )
 
+    @staticmethod
+    def cross_site_problem(headers) -> str | None:
+        """Refuse a request a browser says came from somewhere else.
+
+        The loopback guard above does nothing here: a browser *is* on loopback.
+        Any page in any tab can POST to ``http://localhost:8808/api/update`` --
+        no token, no CORS preflight for a simple request -- and the update runs.
+        That is the realistic attack on this endpoint, not someone on the LAN.
+
+        ``Sec-Fetch-Site`` is the defence, because it is set by the browser and
+        cannot be set by the page. Absent means the caller is not a browser at
+        all (curl, a script), which is allowed: the point is not to authenticate,
+        it is to stop a foreign page from spending this endpoint.
+        """
+        site = headers.get("sec-fetch-site")
+        if site is not None and site not in ("same-origin", "none"):
+            return f"Refusing an update requested from another site ({site})"
+        origin = headers.get("origin")
+        host = headers.get("host")
+        if origin and host and origin.split("//")[-1] != host:
+            return f"Refusing an update requested from {origin}"
+        return None
+
     def start(self) -> Status:
         """Launch the script. Raises RuntimeError if it must not run."""
         problem = self.checkout_problem()
