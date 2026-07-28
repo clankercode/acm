@@ -775,6 +775,46 @@ input.inline-name:hover { border-color: var(--border); }
 
 .table-scroll { overflow-x: auto; }
 
+/* A long table scrolls in its own box rather than growing the page, so the
+   panels below it stay reachable. `max-height` is set inline from a measured row
+   height, which is the only way the clip lands on a row boundary. */
+.table-scroll.clipped { overflow-y: auto; overscroll-behavior: contain; }
+
+/* The total is the row most worth keeping in view while scrolling the rest. */
+.table-scroll.clipped tfoot td {
+  position: sticky;
+  bottom: 0;
+  background: var(--page);
+}
+
+.table-resize {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  /* Tall enough to hit without care, being a drag target. */
+  height: 14px;
+  cursor: ns-resize;
+  border-block-start: var(--rule) solid var(--border-strong);
+  color: var(--text-muted);
+  /* A drag that leaves the handle must not select the table behind it. */
+  user-select: none;
+  touch-action: none;
+}
+.table-resize:hover,
+.table-resize:focus-visible { color: var(--text-primary); background: var(--surface-2); }
+.table-resize:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.table-resize-grip {
+  width: 28px;
+  height: 3px;
+  border-block: var(--rule) solid currentColor;
+  opacity: .5;
+}
+.table-resize:hover .table-resize-grip { opacity: 1; }
+
+.table-resize-note { font: var(--type-label); letter-spacing: .06em; }
+
 table.data {
   width: 100%;
   border-collapse: collapse;

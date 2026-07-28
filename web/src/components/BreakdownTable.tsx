@@ -1,7 +1,24 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { compact, integer, pct, rate, usd } from '../lib/format'
 import type { ColorScale } from '../lib/palette'
 import type { BreakdownRow } from '../lib/types'
+
+/** Rows shown before a table starts scrolling instead of growing the page. */
+const DEFAULT_ROWS = 24
+
+/**
+ * Extra rows a table may exceed the cap by and still be drawn whole.
+ *
+ * Clipping 26 rows down to 24 trades two rows of page height for a scrollbar
+ * and a handle, which is a worse deal than just showing them.
+ */
+const CLIP_SLACK = 4
+
+/** Small enough to be useful for a glance at the top few, not a sliver. */
+const MIN_ROWS = 5
+
+/** Fallback when a row height cannot be measured yet, e.g. the first paint. */
+const ASSUMED_ROW_PX = 22
 
 type Col = {
   key: keyof BreakdownRow
@@ -90,6 +107,93 @@ export function BreakdownTable({ rows, label, colors, flag, onSelect }: Props) {
     }
   }, [rows])
 
+  // `null` means "however many the cap allows"; a number is the user's own
+  // choice, which survives the data changing underneath it.
+  const [chosenRows, setChosenRows] = useState<number | null>(null)
+  const [rowPx, setRowPx] = useState(ASSUMED_ROW_PX)
+  const [chromePx, setChromePx] = useState(0)
+  const headRef = useRef<HTMLTableSectionElement | null>(null)
+  const bodyRef = useRef<HTMLTableSectionElement | null>(null)
+  const footRef = useRef<HTMLTableSectionElement | null>(null)
+
+  // Long enough to be worth clipping at all. Short tables -- every panel here
+  // except the repository one -- are left exactly as they were.
+  const clipped = rows.length > DEFAULT_ROWS + CLIP_SLACK
+  const visible = Math.min(
+    Math.max(chosenRows ?? DEFAULT_ROWS, MIN_ROWS),
+    rows.length,
+  )
+
+  // Measured rather than assumed, so the clip lands on a row boundary instead of
+  // halfway through one. Re-measured when the font or the data changes size.
+  useLayoutEffect(() => {
+    if (!clipped) return
+    const measure = () => {
+      const row = bodyRef.current?.rows[0]
+      if (row) setRowPx(row.getBoundingClientRect().height || ASSUMED_ROW_PX)
+      const head = headRef.current?.getBoundingClientRect().height ?? 0
+      const foot = footRef.current?.getBoundingClientRect().height ?? 0
+      setChromePx(head + foot)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    if (bodyRef.current) observer.observe(bodyRef.current)
+    return () => observer.disconnect()
+  }, [clipped, rows.length])
+
+  const drag = useRef<{ y: number; rows: number } | null>(null)
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      e.currentTarget.setPointerCapture(e.pointerId)
+      drag.current = { y: e.clientY, rows: visible }
+    },
+    [visible],
+  )
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!drag.current) return
+      const moved = Math.round((e.clientY - drag.current.y) / rowPx)
+      setChosenRows(drag.current.rows + moved)
+    },
+    [rowPx],
+  )
+
+  const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    drag.current = null
+    e.currentTarget.releasePointerCapture(e.pointerId)
+  }, [])
+
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const step =
+        e.key === 'ArrowDown' ? 1
+        : e.key === 'ArrowUp' ? -1
+        : e.key === 'PageDown' ? 5
+        : e.key === 'PageUp' ? -5
+        : 0
+      if (step) {
+        e.preventDefault()
+        setChosenRows(visible + step)
+      } else if (e.key === 'End') {
+        e.preventDefault()
+        setChosenRows(rows.length)
+      } else if (e.key === 'Home') {
+        e.preventDefault()
+        setChosenRows(DEFAULT_ROWS)
+      }
+    },
+    [visible, rows.length],
+  )
+
+  // A sort change can move an interesting row out of the visible window, and a
+  // table scrolled halfway down then re-sorted is showing an arbitrary slice.
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 })
+  }, [sort])
+
   if (!rows.length) return <div className="empty">Nothing in this range</div>
 
   const header = (col: Col) => (
@@ -107,9 +211,14 @@ export function BreakdownTable({ rows, label, colors, flag, onSelect }: Props) {
   )
 
   return (
-    <div className="table-scroll">
+    <>
+    <div
+      className={'table-scroll' + (clipped ? ' clipped' : '')}
+      ref={scrollRef}
+      style={clipped ? { maxHeight: chromePx + rowPx * visible } : undefined}
+    >
       <table className="data">
-        <thead>
+        <thead ref={headRef}>
           <tr>
             <th
               aria-sort={sort.key === 'key' ? (sort.desc ? 'descending' : 'ascending') : undefined}
@@ -122,7 +231,7 @@ export function BreakdownTable({ rows, label, colors, flag, onSelect }: Props) {
             {COLUMNS.map(header)}
           </tr>
         </thead>
-        <tbody>
+        <tbody ref={bodyRef}>
           {sorted.map((row) => {
             const note = flag?.(row)
             return (
@@ -156,7 +265,7 @@ export function BreakdownTable({ rows, label, colors, flag, onSelect }: Props) {
             )
           })}
         </tbody>
-        <tfoot>
+        <tfoot ref={footRef}>
           <tr>
             <td>Total</td>
             <td>{integer(totals.requests)}</td>
@@ -170,5 +279,34 @@ export function BreakdownTable({ rows, label, colors, flag, onSelect }: Props) {
         </tfoot>
       </table>
     </div>
+    {/* Only drawn for a table that is actually holding rows back, so it doubles
+        as the notice that there are more -- a scrollbar alone is easy to miss
+        against a page that scrolls itself. */}
+    {clipped && (
+      <div
+        className="table-resize"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Rows shown"
+        aria-valuenow={visible}
+        aria-valuemin={MIN_ROWS}
+        aria-valuemax={rows.length}
+        tabIndex={0}
+        title="Drag to show more or fewer rows. Double-click for all of them."
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onKeyDown={onKeyDown}
+        onDoubleClick={() =>
+          setChosenRows(visible >= rows.length ? DEFAULT_ROWS : rows.length)
+        }
+      >
+        <span className="table-resize-grip" aria-hidden="true" />
+        <span className="table-resize-note">
+          {visible} of {rows.length}
+        </span>
+      </div>
+    )}
+    </>
   )
 }
