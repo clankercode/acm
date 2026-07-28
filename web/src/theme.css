@@ -895,11 +895,15 @@ table.data td.group-start {
   border-inline-start: var(--rule) solid var(--border-strong);
 }
 
-/* Spans its group, so it is a heading rather than a column label. */
+/* Spans its group, so it is a heading rather than a column label. Not sticky:
+   every other `th` pins at top: 0, and two rows sharing that offset means the
+   column labels paint straight over this one -- the heading would vanish
+   exactly when the header sticks. It scrolls away under the labels instead. */
 table.data tr.group-row th {
   text-align: center;
   padding-block-end: 0;
   cursor: default;
+  position: static;
 }
 
 table.data tr.group-row th:hover { color: var(--text-muted); }

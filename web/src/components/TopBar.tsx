@@ -326,6 +326,27 @@ export function TopBar(props: Props) {
           ))}
         </div>
 
+        {/* A view control, not a filter: nothing is excluded by turning it off,
+            so it sits with range and bucket rather than with the pickers, and it
+            is not counted by "Clear". One switch for every output surface at
+            once -- columns, KPI, charts, calendar -- because a page where each
+            of those had its own toggle is a page nobody can put back. */}
+        <span className="control">View</span>
+        <div className="seg" role="group" aria-label="Output token columns">
+          <button
+            type="button"
+            aria-pressed={props.showOutput}
+            onClick={() => props.onShowOutput(!props.showOutput)}
+            title={
+              props.showOutput
+                ? 'Hide the output-token columns, charts and KPI'
+                : 'Show output tokens: what was generated, what it cost, and $/Mtok out'
+            }
+          >
+            Output
+          </button>
+        </div>
+
         <MultiPicker
           label="Model"
           options={dims?.models ?? []}
@@ -362,26 +383,6 @@ export function TopBar(props: Props) {
               {v === 'all' ? 'All agents' : v === 'main' ? 'Main' : 'Subagents'}
             </button>
           ))}
-        </div>
-
-        {/* A view control, not a filter: nothing is excluded by turning it off,
-            so it sits with range and bucket rather than with the pickers, and it
-            is not counted by "Clear". One switch for every output surface at
-            once -- columns, KPI, charts, calendar -- because a page where each
-            of those had its own toggle is a page nobody can put back. */}
-        <div className="seg" role="group" aria-label="Output token columns">
-          <button
-            type="button"
-            aria-pressed={props.showOutput}
-            onClick={() => props.onShowOutput(!props.showOutput)}
-            title={
-              props.showOutput
-                ? 'Hide the output-token columns, charts and KPI'
-                : 'Show output tokens: what was generated, what it cost, and $/Mtok out'
-            }
-          >
-            Output
-          </button>
         </div>
 
         {activeFilters > 0 && (

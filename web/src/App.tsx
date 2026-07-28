@@ -37,7 +37,6 @@ function metric(
   kind:
     | 'eff'
     | 'output'
-    | 'outrate'
     | 'outcost'
     | 'cache'
     | 'cost'
@@ -69,12 +68,6 @@ function metric(
         break
       case 'outcost':
         out[i] = outCost
-        break
-      case 'outrate':
-        // Only where something was actually generated: a bucket of pure prompt
-        // replay has no rate, and plotting zero would draw a dive to the axis
-        // that reads as a price cut.
-        if (outCost != null && generated) out[i] = outCost / (generated / 1e6)
         break
       case 'cache':
         if (cached != null && input) out[i] = (cached / input) * 100

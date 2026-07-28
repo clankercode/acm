@@ -128,8 +128,14 @@ const OUTPUT_COLUMNS: Col[] = [
   {
     key: 'output_rate',
     label: '$/M out',
-    render: (r) => rate(r.output_rate),
-    total: (rows) => rate(ratio(sum(rows, 'cost_output'), sum(rows, 'output_tokens'))),
+    // No generation, or generation on a model with no rate in the table, both
+    // arrive here as a zero that would read as free output. There is no answer
+    // in either case, so say so rather than print one.
+    render: (r) => (r.output_tokens && r.cost_output ? rate(r.output_rate) : '—'),
+    total: (rows) => {
+      const r = ratio(sum(rows, 'cost_output'), sum(rows, 'output_tokens'))
+      return r ? rate(r) : '—'
+    },
     narrow: true,
     title:
       'Cost per million output tokens. Effectively the model’s list output' +

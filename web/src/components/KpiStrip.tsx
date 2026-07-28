@@ -121,7 +121,11 @@ export function KpiStrip({ totals, previous, showOutput }: Props) {
           value={compact(totals.output_tokens)}
           sub={
             <>
-              {usd(totals.cost_output)} at {rate(totals.output_rate)}/M ·{' '}
+              {usd(totals.cost_output)}
+              {totals.output_tokens && totals.cost_output
+                ? ` at ${rate(totals.output_rate)}/M`
+                : ''}{' '}
+              ·{' '}
               {pct(totals.cost ? totals.cost_output / totals.cost : 0, 0)} of spend
             </>
           }
