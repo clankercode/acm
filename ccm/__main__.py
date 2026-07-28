@@ -223,6 +223,11 @@ def cmd_serve(args, settings) -> int:
             port=settings.port,
             log_level=args.log_level,
             timeout_graceful_shutdown=5,
+            # Explicitly off. Uvicorn trusts X-Forwarded-For from 127.0.0.1 by
+            # default, so behind any same-host proxy every LAN client would
+            # arrive as a loopback address and the update endpoint's peer check
+            # would be satisfied by a header the client can send itself.
+            proxy_headers=False,
         )
     )
 

@@ -6,6 +6,7 @@ import type { ColorScale } from '../lib/palette'
 import type { AppState, Filters, ScanState } from '../lib/types'
 import { sourceLabel } from '../lib/types'
 import { shortModel, repoLabel } from '../lib/format'
+import { UpdateButton } from './UpdateButton'
 
 export const RANGES = [
   { key: '24h', label: '24h', ms: 24 * 3600e3 },
@@ -271,6 +272,10 @@ export function TopBar(props: Props) {
         >
           Refresh
         </button>
+
+        {/* Last in the row, and the only control here that replaces the program
+            rather than telling it what to do. */}
+        <UpdateButton />
       </div>
 
       {/* Scope comes before the rest: which agents and which machines you are

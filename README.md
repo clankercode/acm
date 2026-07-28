@@ -57,7 +57,8 @@ Overrides: `--sessions`, `--db`, `--pricing`, or the environment variables
 `CCM_SESSIONS_DIR`, `CCM_CLAUDE_DIR`, `CCM_PI_DIR`, `CCM_OPENCODE_DB`,
 `CCM_GROK_DIR`,
 `CCM_SOURCES`, `CCM_DB`, `CCM_PRICING`, `CCM_REFERENCE`, `CCM_HOST`, `CCM_PORT`,
-`CCM_POLL`. `CCM_SOURCES=codex,claude` restricts the scan to named clients.
+`CCM_POLL`, `CCM_CHECKOUT`, `CCM_UPDATE_FROM_LAN`.
+`CCM_SOURCES=codex,claude` restricts the scan to named clients.
 For the service, they go in `~/.config/ccm/env` — see
 [`packaging/ccm.env.example`](packaging/ccm.env.example).
 
@@ -446,6 +447,50 @@ has. The stream dropping is the cue to look; the id on the reconnect's `hello` i
 what confirms it, and the tab then offers a reload rather than taking one. A
 plain restart on unchanged code is deliberately not an update.
 
+**Update** in the header does what `just update` does — pull, rebuild, reinstall,
+restart — after a confirmation that says so. It needs `CCM_CHECKOUT` pointing at
+the git checkout to build from, because an installed wheel has no idea where it
+came from and guessing is not good enough for something that pulls code and
+installs it. The script runs as its own transient systemd unit, since restarting
+`ccm.service` kills everything in that service's cgroup, and it writes a
+transcript the panel tails: an update fails for reasons only `git` or `uv` can
+explain, so the failure is shown verbatim rather than summarised. The connection
+dying part-way through is the expected path, not an error — the reload prompt
+above takes over from there.
+
+Four guards sit in front of it, and the first one is the least interesting.
+
+*It is refused from anywhere but the machine running the monitor.* The dashboard
+binds every interface and has no authentication, so an endpoint that runs a shell
+script is remote code execution for anyone who can reach the port;
+`CCM_UPDATE_FROM_LAN=1` opts out and is nobody's default.
+
+*It is refused when a browser says the request came from another page.* This is
+the attack that matters, and the loopback check above does nothing about it,
+because a browser **is** on loopback: any tab could POST to
+`http://localhost:8808/api/update` — a simple request, so no preflight, and there
+is no token to miss. `Sec-Fetch-Site` must be same-origin and `Origin` must agree
+with `Host`. The same check covers every write in the API, not just this one: the
+same tab could as easily delete an imported machine or rewrite the rate table. A
+caller that sends neither header is not a browser and is allowed — this is not a
+login, it only refuses foreign pages.
+
+*It is refused unless this machine was addressed as `localhost` or a loopback
+address.* Otherwise DNS rebinding walks straight through the two guards above
+while forging nothing: a page on `http://somewhere.example:8808` whose name is
+re-pointed at 127.0.0.1 is genuinely same-origin, genuinely matches its own
+`Host`, and genuinely arrives from a loopback peer. Only the update endpoint is
+this strict; reads and the other writes still work under the box's real hostname.
+
+*The checkout is checked* for a `justfile` and a `pyproject.toml` before anything
+runs, so a misconfigured path cannot pull some other repository and install it as
+this program.
+
+**Do not put this behind a reverse proxy on the same host.** The peer-address
+guard is the socket's peer, so a proxy makes every client on the network look
+local. `proxy_headers` is switched off explicitly for the same reason — otherwise
+uvicorn would trust an `X-Forwarded-For` that the client sets itself.
+
 If inotify is unavailable — the per-user instance limit is easy to hit, and each
 client needs its own watcher — the watcher logs it once and falls back to
 polling. A slow poll runs regardless, because watches only cover directories
@@ -454,7 +499,7 @@ that existed at start-up and each new day creates one.
 ## Tests
 
 ```
-just test                     # 176 unit and integration tests, ~9s
+just test                     # 191 unit and integration tests, ~10s
 just test-corpus              # 28 tests against the real corpora, ~44s
 just check                    # what CI runs: tests, tsc, and a wheel that must serve
 ```

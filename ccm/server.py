@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from . import aggregate as A, portable
 from .config import PACKAGE_ROOT, PROJECT_ROOT, Settings, settings as default_settings
 from .engine import Engine
+from .selfupdate import Updater
 
 
 #: The distribution name, which is not the import name -- ``version("ccm")``
@@ -155,9 +156,27 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
         lifespan=lifespan,
     )
     app.state.engine = engine
+    updater = Updater(settings)
+    app.state.updater = updater
     # Read once: the answer only changes when the process is replaced, and this
     # rides along on every snapshot and every stream reconnect.
     app.state.build = build_identity()
+
+    @app.middleware("http")
+    async def refuse_cross_site_writes(request: Request, call_next):
+        """No page from another site gets to change anything here.
+
+        Found while thinking about the update endpoint, but it is not special:
+        the dashboard has no authentication, so a page in any tab could POST to
+        localhost and delete an imported machine or rewrite the rate table.
+        Reads are left alone -- they are already public to anything that can
+        reach the port, and this is not authentication.
+        """
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            refusal = Updater.cross_site_problem(request.headers)
+            if refusal:
+                return JSONResponse({"detail": refusal}, status_code=403)
+        return await call_next(request)
 
     def snapshot() -> dict:
         """The engine's view plus which build served it."""
@@ -406,6 +425,45 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
     @app.post("/api/scan/resume")
     def post_resume() -> dict:
         return {"paused": engine.set_paused(False)}
+
+    # -- self-update --------------------------------------------------------
+
+    @app.get("/api/update")
+    def get_update(request: Request) -> dict:
+        status = updater.status()
+        # The address is part of the answer, not just of the decision: the button
+        # has to be able to say "not from here" before it is pressed.
+        refusal = updater.may_start_from(request.client.host if request.client else None)
+        if refusal:
+            # The transcript and the checkout path are withheld, not just the
+            # verdict: together they name a filesystem path (so the username),
+            # the commits being deployed, and whatever paths a failing build
+            # printed -- reconnaissance handed to exactly the caller we just
+            # refused.
+            return {
+                **status.as_dict(),
+                "available": False,
+                "reason": refusal,
+                "log": "",
+                "checkout": None,
+            }
+        return status.as_dict()
+
+    @app.post("/api/update")
+    def post_update(request: Request) -> dict:
+        refusal = (
+            updater.may_start_from(request.client.host if request.client else None)
+            or updater.cross_site_problem(request.headers)
+            or updater.host_header_problem(request.headers)
+        )
+        if refusal:
+            # 403 rather than 409: this is about who is asking, and no amount of
+            # retrying from the same place will change the answer.
+            raise HTTPException(403, refusal)
+        try:
+            return updater.start().as_dict()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     # -- live stream --------------------------------------------------------
 
