@@ -16,7 +16,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import aggregate as A, portable
+from . import aggregate as A, cache_decay as CD, portable
 from .config import PACKAGE_ROOT, PROJECT_ROOT, Settings, settings as default_settings
 from .engine import Engine
 from .selfupdate import Updater
@@ -266,6 +266,10 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
     @app.get("/api/quality")
     def get_quality() -> dict:
         return A.data_quality(engine.store, engine.pricing)
+
+    @app.get("/api/cache-decay")
+    def get_cache_decay(request: Request) -> dict:
+        return CD.cache_decay(engine.store, filters_from(request))
 
     # -- pricing -----------------------------------------------------------
 
