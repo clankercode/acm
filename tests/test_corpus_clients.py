@@ -24,6 +24,7 @@ from ccm.scanner import Scanner
 from ccm.sources import (
     ClaudeSource,
     GrokSource,
+    HermesSource,
     KimiCliSource,
     KimiCodeSource,
     OpenCodeSource,
@@ -39,6 +40,7 @@ OPENCODE = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
 GROK = Path.home() / ".grok" / "sessions"
 KIMI_CODE = Path.home() / ".kimi-code" / "sessions"
 KIMI_CLI = Path.home() / ".kimi" / "sessions"
+HERMES = Path.home() / ".hermes" / "state.db"
 REPO_PRICING = Path(__file__).resolve().parent.parent / "pricing.toml"
 
 pytestmark = [
@@ -51,6 +53,7 @@ pytestmark = [
             or GROK.exists()
             or KIMI_CODE.exists()
             or KIMI_CLI.exists()
+            or HERMES.exists()
         ),
         reason="no non-Codex client histories on this machine",
     ),
@@ -71,6 +74,8 @@ def available_sources():
         sources.append(KimiCodeSource(KIMI_CODE))
     if KIMI_CLI.exists():
         sources.append(KimiCliSource(KIMI_CLI))
+    if HERMES.exists():
+        sources.append(HermesSource(HERMES))
     return sources
 
 
@@ -566,6 +571,65 @@ def test_kimi_cli_matches_an_independent_implementation(scanned):
     ours = {
         row["dk"]: row
         for row in store.query("SELECT * FROM requests WHERE source = 'kimi_cli'")
+    }
+
+    assert len(ours) == len(reference["requests"])
+    assert set(ours) == set(reference["requests"])
+    for key, ref in reference["requests"].items():
+        mine = ours[key]
+        assert mine["input_tokens"] == ref[0], key
+        assert mine["cached_tokens"] == ref[1], key
+        assert mine["cache_write_tokens"] == ref[2], key
+        assert mine["output_tokens"] == ref[3], key
+
+
+def reference_hermes() -> dict:
+    """A second, deliberately naive implementation of the Hermes rules.
+
+    Reads the full table directly with stdlib sqlite3, reassembling the prompt
+    the same way the reader does so an exact match is the gate. The reader's
+    first pass scans the whole table (since=0), so the fair comparison is
+    against every row in its current state (newest revision wins).
+    """
+    rows: dict[str, tuple] = {}
+    raw = 0
+    conn = sqlite3.connect(f"file:{HERMES}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    for row in conn.execute(
+        "SELECT session_id, model, billing_provider, task, api_call_count,"
+        " input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,"
+        " reasoning_tokens"
+        " FROM session_model_usage"
+    ):
+        sid = row["session_id"] or ""
+        model = row["model"] or "unknown"
+        provider = row["billing_provider"] or ""
+        task = row["task"] or ""
+        dk = f"{sid}|{model}|{provider}|{task}"
+        fresh = row["input_tokens"] or 0
+        cache_read = row["cache_read_tokens"] or 0
+        cache_write = row["cache_write_tokens"] or 0
+        output = row["output_tokens"] or 0
+        reasoning = row["reasoning_tokens"] or 0
+        rows[dk] = (
+            fresh + cache_read + cache_write,
+            cache_read,
+            cache_write,
+            output + reasoning,
+        )
+        raw += 1
+    conn.close()
+    return {"requests": rows, "raw": raw}
+
+
+@pytest.mark.skipif(not HERMES.exists(), reason="no Hermes database")
+def test_hermes_matches_an_independent_implementation(scanned):
+    """The gate: identical rows in, identical deduped requests out."""
+    store, _, _ = scanned
+    reference = reference_hermes()
+    ours = {
+        r["dk"]: r
+        for r in store.query("SELECT * FROM requests WHERE source = 'hermes'")
     }
 
     assert len(ours) == len(reference["requests"])

@@ -787,6 +787,85 @@ class KimiCliWire:
         return path
 
 
+def build_hermes_db(
+    path: Path,
+    usage_rows: list[dict],
+    *,
+    session_id: str = "ses_test",
+    parent_id: str | None = None,
+    cwd: str = "/home/dev/project",
+) -> Path:
+    """A minimal Hermes state.db with just the columns the reader touches."""
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY, parent_session_id TEXT, model TEXT,
+            cwd TEXT, git_branch TEXT, git_repo_root TEXT,
+            started_at REAL, ended_at REAL
+        );
+        CREATE TABLE IF NOT EXISTS session_model_usage (
+            session_id TEXT NOT NULL, model TEXT NOT NULL,
+            billing_provider TEXT NOT NULL DEFAULT '',
+            billing_base_url TEXT NOT NULL DEFAULT '',
+            billing_mode TEXT NOT NULL DEFAULT '',
+            task TEXT NOT NULL DEFAULT '',
+            api_call_count INTEGER NOT NULL DEFAULT 0,
+            input_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+            reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+            estimated_cost_usd REAL NOT NULL DEFAULT 0,
+            actual_cost_usd REAL,
+            first_seen REAL, last_seen REAL,
+            PRIMARY KEY (session_id, model, billing_provider, billing_base_url, billing_mode, task)
+        );
+        """
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO sessions (id, parent_session_id, model, cwd,"
+        " git_branch, started_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            session_id,
+            parent_id,
+            usage_rows[0].get("model", "glm-5.2"),
+            cwd,
+            "main",
+            usage_rows[0].get("first_seen", 1780000000.0),
+            usage_rows[0].get("last_seen", 1780000010.0),
+        ),
+    )
+    for u in usage_rows:
+        conn.execute(
+            "INSERT OR REPLACE INTO session_model_usage (session_id, model,"
+            " billing_provider, task, api_call_count, input_tokens,"
+            " output_tokens, cache_read_tokens, cache_write_tokens,"
+            " reasoning_tokens, estimated_cost_usd, actual_cost_usd,"
+            " first_seen, last_seen)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                u.get("session_id", session_id),
+                u["model"],
+                u.get("billing_provider", ""),
+                u.get("task", ""),
+                u.get("api_call_count", 1),
+                u.get("fresh", 0),
+                u.get("output", 0),
+                u.get("cache_read", 0),
+                u.get("cache_write", 0),
+                u.get("reasoning", 0),
+                u.get("estimated_cost_usd", 0.0),
+                u.get("actual_cost_usd"),
+                u.get("first_seen", 1780000000.0),
+                u.get("last_seen", 1780000010.0),
+            ),
+        )
+    conn.commit()
+    conn.close()
+    return path
+
+
 @pytest.fixture
 def sessions_dir(tmp_path: Path) -> Path:
     d = tmp_path / "sessions" / "2026" / "07" / "01"

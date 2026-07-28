@@ -20,6 +20,7 @@ from ccm.scanner import Scanner
 from ccm.sources import (
     ClaudeSource,
     GrokSource,
+    HermesSource,
     KimiCliSource,
     KimiCodeSource,
     OpenCodeSource,
@@ -650,6 +651,128 @@ def test_kimi_cli_ingest_is_idempotent(tmp_path, store, clock):
     store.reset_file(store.query("SELECT path FROM files")[0]["path"])
     scanner.scan_once()
     assert len(rows(store, "kimi_cli")) == 1
+
+
+# ---------------------------------------------------------------------------
+# Hermes
+
+
+def test_hermes_reassembles_the_whole_prompt(tmp_path, store):
+    """Hermes reports cache splits separate from input_tokens (fresh-only)."""
+    from .conftest import build_hermes_db
+
+    db = build_hermes_db(
+        tmp_path / "h.db",
+        [{"model": "glm-5.2", "fresh": 500, "cache_read": 49_000, "output": 200}],
+    )
+
+    Scanner(store, sources=[HermesSource(db)]).scan_once()
+    (row,) = rows(store, "hermes")
+    assert row["input_tokens"] == 49_500
+    assert row["cached_tokens"] == 49_000
+
+
+def test_hermes_folds_reasoning_into_billable_output(tmp_path, store):
+    from .conftest import build_hermes_db
+
+    db = build_hermes_db(
+        tmp_path / "h.db",
+        [{"model": "glm-5.2", "fresh": 0, "output": 200, "reasoning": 300}],
+    )
+
+    Scanner(store, sources=[HermesSource(db)]).scan_once()
+    (row,) = rows(store, "hermes")
+    assert row["output_tokens"] == 500
+    assert row["reasoning_tokens"] == 300
+
+
+def test_hermes_normalizes_model_suffix(tmp_path, store):
+    from .conftest import build_hermes_db
+
+    db = build_hermes_db(
+        tmp_path / "h.db",
+        [{"model": "glm-5.2:cloud", "fresh": 10, "output": 1}],
+    )
+
+    Scanner(store, sources=[HermesSource(db)]).scan_once()
+    (row,) = rows(store, "hermes")
+    assert row["model"] == "glm-5.2"
+    assert row["base_model"] == "glm-5.2"
+
+
+def test_hermes_flags_multi_call_sessions(tmp_path, store):
+    from .conftest import build_hermes_db
+
+    db = build_hermes_db(
+        tmp_path / "h.db",
+        [{"model": "glm-5.2", "fresh": 10, "output": 1, "api_call_count": 5}],
+    )
+
+    Scanner(store, sources=[HermesSource(db)]).scan_once()
+    (anom,) = store.query(
+        "SELECT * FROM anomalies WHERE kind = 'multi_call_turn'"
+    )
+    assert anom["count"] == 4
+
+
+def test_hermes_marks_child_sessions_as_subagents(tmp_path, store):
+    from .conftest import build_hermes_db
+
+    db = build_hermes_db(
+        tmp_path / "h.db",
+        [{"model": "glm-5.2", "fresh": 10, "output": 1}],
+        parent_id="ses_parent",
+    )
+
+    Scanner(store, sources=[HermesSource(db)]).scan_once()
+    (row,) = store.query("SELECT is_subagent, depth FROM sessions")
+    assert row["is_subagent"] == 1
+    assert row["depth"] == 1
+
+
+def test_hermes_picks_up_an_edited_row(tmp_path, store):
+    """Rows are mutated as a session progresses; the newest revision wins."""
+    from .conftest import build_hermes_db
+
+    path = tmp_path / "h.db"
+    build_hermes_db(
+        path,
+        [{"model": "glm-5.2", "fresh": 10, "output": 5}],
+    )
+    source = HermesSource(path)
+    scanner = Scanner(store, sources=[source])
+    scanner.scan_once()
+    assert rows(store, "hermes")[0]["output_tokens"] == 5
+
+    build_hermes_db(
+        path,
+        [{"model": "glm-5.2", "fresh": 10, "output": 900, "last_seen": 1780000090.0}],
+    )
+    scanner.scan_once()
+    got = rows(store, "hermes")
+    assert len(got) == 1
+    assert got[0]["output_tokens"] == 900
+
+
+def test_hermes_rescanning_unchanged_rows_adds_nothing(tmp_path, store):
+    from .conftest import build_hermes_db
+
+    db = build_hermes_db(
+        tmp_path / "h.db",
+        [
+            {"model": "glm-5.2", "fresh": 10, "output": 5},
+            {
+                "model": "glm-5.1",
+                "fresh": 20,
+                "cache_read": 5,
+                "output": 6,
+            },
+        ],
+    )
+    scanner = Scanner(store, sources=[HermesSource(db)])
+    scanner.scan_once()
+    scanner.scan_once()
+    assert len(rows(store, "hermes")) == 2
 
 
 # ---------------------------------------------------------------------------
