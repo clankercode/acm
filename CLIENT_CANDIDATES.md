@@ -2,7 +2,7 @@
 
 Inventory of coding agents we could scan for token / cache / cost stats.
 
-**Currently implemented** (see `ccm/sources/` and README): Codex, Claude Code, Pi, OpenCode, Grok, Kimi Code, Kimi CLI, Hermes, Copilot CLI.
+**Currently implemented** (see `ccm/sources/` and README): Codex, Claude Code, Pi, OpenCode, Grok, Kimi Code, Kimi CLI, Hermes, Copilot CLI, Gemini CLI.
 
 This file is about **what else exists on this machine (or should)**, split by whether we already have a local history corpus to reverse-engineer against.
 
@@ -22,7 +22,7 @@ These have install/state dirs on this host and look scannable (or almost). Rough
 | **GitHub Copilot CLI** | `~/.copilot/session-store.db` (`assistant_usage_events`), per-session `session-state/*/events.jsonl` | SQLite + JSONL | **Yes — excellent.** `assistant_usage_events`: model, input/output/cache read/write/reasoning tokens, duration, endpoint | ~1.7 GB total; 196 usage events in sample (~10 M input tokens). Events stream is conversational; usage table is the gold path. |
 | **Cursor** (IDE agent + CLI) | `~/.cursor/projects/*/agent-transcripts/**/*.jsonl`, `~/.cursor/chats`, `~/.cursor/ai-tracking/ai-code-tracking.db`, `~/.config/Cursor/User/globalStorage` | JSONL transcripts, SQLite tracking, Electron storage | **Partial.** Transcripts are role/message content (often no billable usage). `ai-code-tracking.db` is **code attribution** (hashes, AI % of commits), not tokens. Real usage may live in Composer / globalStorage (harder) | Transcripts: ~600 JSONL files. `cursor-agent` under `~/.local/share/cursor-agent` is **binaries only** — history is under `~/.cursor`. Worth a dedicated spike on where Composer stores token counts. |
 | **Claude Desktop / Cowork** | `~/.config/Claude/` (13 GB), especially `local-agent-mode-sessions/`, `IndexedDB/`, logs (`cowork_*.log`) | Electron: IndexedDB/LevelDB + JSON session metadata | **Partial / opaque.** Local agent sessions store metadata (`cliSessionId`, model, cwd, title) and may **delegate to Claude Code** (shared transcript path). Cloud chats sit in IndexedDB | Cowork/local-agent mode is the interesting path: if it reuses Claude Code transcripts, existing `claude` source may already cover host-loop work; pure Desktop chat needs IndexedDB reverse-engineering. |
-| **Gemini CLI** | `~/.gemini/tmp/*/chats/session-*.json` | JSON sessions | **Weak in local samples.** Messages/tool calls present; clear API-style `usageMetadata` not obvious in first samples | ~213 MB. Worth supporting when sessions include usage metadata; format is file-based and readable. Antigravity also under `~/.gemini/antigravity/` + `~/.config/Antigravity/`. |
+| **Gemini CLI** | `~/.gemini/tmp/*/chats/session-*.jsonl` | JSONL | **Yes — per-request.** Each `type=gemini` line carries `tokens: {input, output, cached, thoughts, tool, total}` + `model` | ✅ implemented (`ccm/sources/gemini.py`). 3 session files on this host (~35 unique requests). |
 | **Goose** | `~/.local/share/goose/sessions/sessions.db` | SQLite | **Schema yes, data thin.** Columns: `total_tokens`, `input_tokens`, `output_tokens`, accumulated_*, provider/model config | Only 1 session / 0 messages in sample — easy source once someone uses it more. |
 | **Zed Agent** | `~/.local/share/zed/threads/threads.db` | SQLite blob threads | **Unclear.** 6 threads; usage likely embedded in `data` blob if at all | Low volume; needs schema peek inside `data`. |
 | **OpenHands** | `~/.openhands/` | Mostly skills/cache | **No real session corpus** | Install present; not a usage source yet. |
@@ -35,8 +35,9 @@ These have install/state dirs on this host and look scannable (or almost). Rough
 2. **Hermes** — ✅ implemented (`ccm/sources/hermes.py`)
 3. **Copilot CLI** — ✅ implemented (`ccm/sources/copilot.py`)
 4. **Kimi CLI** — ✅ implemented (`ccm/sources/kimi_cli.py`)
-5. **Cursor** — only after confirming a token-bearing store (not just transcripts / AI-code %). A 2026-07-28 spike confirmed `ai-code-tracking.db` has **no token columns**; the only remaining candidate is the opaque 516 MB Electron `state.vscdb` (LevelDB blob), which needs deep reverse-engineering with uncertain payoff.
-6. **Claude Desktop / Cowork** — first check whether Cowork sessions already appear under Claude Code projects via `cliSessionId`
+5. **Cursor** — only after confirming a token-bearing store (not just transcripts / AI-code %). A 2026-07-28 spike confirmed `ai-code-tracking.db` has **no token columns** (only code-attribution hashes and AI-commit-%). Chat `store.db` blobs are serialized conversation messages (role/content JSON) with no structured token metadata. The remaining candidate is the opaque 516 MB Electron `state.vscdb` (LevelDB blob), which needs deep reverse-engineering with uncertain payoff. **Verdict: negative — no per-request token store found.**
+6. **Claude Desktop / Cowork** — 2026-07-28 spike checked `~/.config/Claude/`: LevelDB localStorage has no token fields; cowork logs (`cowork_vm_node.log`, `claude.ai-web.log`) carry no usage data; no SQLite databases present. Cowork sessions may already appear under Claude Code projects via `cliSessionId`, in which case the existing `claude` source covers them. **Verdict: negative — no independent per-request token store.**
+7. **Gemini CLI** — ✅ implemented (`ccm/sources/gemini.py`). Session JSONL under `~/.gemini/tmp/*/chats/` carries per-request `tokens` blocks with input/output/cached/thoughts splits and model attribution.
 
 ---
 

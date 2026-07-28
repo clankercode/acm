@@ -24,6 +24,7 @@ from ccm.scanner import Scanner
 from ccm.sources import (
     ClaudeSource,
     CopilotSource,
+    GeminiSource,
     GrokSource,
     HermesSource,
     KimiCliSource,
@@ -43,6 +44,7 @@ KIMI_CODE = Path.home() / ".kimi-code" / "sessions"
 KIMI_CLI = Path.home() / ".kimi" / "sessions"
 HERMES = Path.home() / ".hermes" / "state.db"
 COPILOT = Path.home() / ".copilot" / "session-store.db"
+GEMINI = Path.home() / ".gemini" / "tmp"
 REPO_PRICING = Path(__file__).resolve().parent.parent / "pricing.toml"
 
 pytestmark = [
@@ -57,6 +59,7 @@ pytestmark = [
             or KIMI_CLI.exists()
             or HERMES.exists()
             or COPILOT.exists()
+            or GEMINI.exists()
         ),
         reason="no non-Codex client histories on this machine",
     ),
@@ -81,6 +84,8 @@ def available_sources():
         sources.append(HermesSource(HERMES))
     if COPILOT.exists():
         sources.append(CopilotSource(COPILOT))
+    if GEMINI.exists():
+        sources.append(GeminiSource(GEMINI))
     return sources
 
 
@@ -681,6 +686,73 @@ def test_copilot_matches_an_independent_implementation(scanned):
     }
 
     assert len(ours) == len(reference["requests"])
+    assert set(ours) == set(reference["requests"])
+    for key, ref in reference["requests"].items():
+        mine = ours[key]
+        assert mine["input_tokens"] == ref[0], key
+        assert mine["cached_tokens"] == ref[1], key
+        assert mine["cache_write_tokens"] == ref[2], key
+        assert mine["output_tokens"] == ref[3], key
+        assert mine["reasoning_tokens"] == ref[4], key
+
+
+# ---------------------------------------------------------------------------
+# Gemini CLI — independent reimplementation
+
+
+def reference_gemini():
+    """A deliberately naive reader for Gemini CLI session JSONL.
+
+    Walks every ``session-*.jsonl`` under ``~/.gemini/tmp``, pulls
+    ``type=="gemini"`` lines, deduplicates on ``id``, and folds ``thoughts``
+    into ``output_tokens`` to match the parser's convention.
+    """
+    rows: dict[str, tuple] = {}
+    raw = 0
+    for f in sorted(GEMINI.rglob("session-*.jsonl")):
+        try:
+            text = f.read_text()
+        except OSError:
+            continue
+        for line in text.splitlines():
+            if '"tokens"' not in line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if obj.get("type") != "gemini":
+                continue
+            tokens = obj.get("tokens")
+            if not isinstance(tokens, dict):
+                continue
+            dk = obj.get("id")
+            if not dk:
+                continue
+            raw += 1
+            prompt = int(tokens.get("input") or 0)
+            cached = int(tokens.get("cached") or 0)
+            output = int(tokens.get("output") or 0)
+            thoughts = int(tokens.get("thoughts") or 0)
+            if cached > prompt:
+                cached = prompt
+            rows[str(dk)] = (prompt, cached, 0, output + thoughts, thoughts)
+    return {"requests": rows, "raw": raw}
+
+
+@pytest.mark.skipif(not GEMINI.exists(), reason="no Gemini CLI history")
+def test_gemini_matches_an_independent_implementation(scanned):
+    """The gate: identical rows in, identical deduped requests out."""
+    store, _, _ = scanned
+    reference = reference_gemini()
+    ours = {
+        r["dk"]: r
+        for r in store.query("SELECT * FROM requests WHERE source = 'gemini'")
+    }
+
+    assert len(ours) == len(reference["requests"]), (
+        f"{len(ours)} rows vs {len(reference['requests'])} reference"
+    )
     assert set(ours) == set(reference["requests"])
     for key, ref in reference["requests"].items():
         mine = ours[key]

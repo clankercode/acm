@@ -14,6 +14,7 @@ dashboard of token usage, prompt-cache performance and notional cost.
 | Kimi CLI | `~/.kimi/sessions` | wire JSONL |
 | Hermes | `~/.hermes/state.db` | SQLite (per-session+model) |
 | Copilot CLI | `~/.copilot/session-store.db` | SQLite (per-request) |
+| Gemini CLI | `~/.gemini/tmp` | session JSONL |
 
 A client with no history on this machine is skipped, so the same build runs
 whether one is installed or all of them.
@@ -60,7 +61,7 @@ ccm reset           # delete derived state (safe; rescanning rebuilds it)
 Overrides: `--sessions`, `--db`, `--pricing`, or the environment variables
 `CCM_SESSIONS_DIR`, `CCM_CLAUDE_DIR`, `CCM_PI_DIR`, `CCM_OPENCODE_DB`,
 `CCM_GROK_DIR`, `CCM_KIMI_CODE_DIR`, `CCM_KIMI_DIR`, `CCM_HERMES_DB`,
-`CCM_COPILOT_DB`,
+`CCM_COPILOT_DB`, `CCM_GEMINI_DIR`,
 `CCM_SOURCES`, `CCM_DB`, `CCM_PRICING`, `CCM_REFERENCE`, `CCM_HOST`, `CCM_PORT`,
 `CCM_POLL`, `CCM_CHECKOUT`, `CCM_UPDATE_FROM_LAN`.
 `CCM_SOURCES=codex,claude` restricts the scan to named clients.

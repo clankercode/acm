@@ -95,6 +95,7 @@ def engine_with(tmp_path, source) -> Engine:
         kimi_dir=tmp_path / "kimi",
         hermes_db=tmp_path / "hermes.db",
         copilot_db=tmp_path / "copilot.db",
+        gemini_dir=tmp_path / "gemini",
         sources=(),
         db_path=tmp_path / "ccm.sqlite",
         pricing_path=tmp_path / "pricing.toml",

@@ -50,6 +50,7 @@ def settings(tmp_path, pricing) -> Settings:
         kimi_dir=tmp_path / "kimi",
         hermes_db=tmp_path / "hermes.db",
         copilot_db=tmp_path / "copilot.db",
+        gemini_dir=tmp_path / "gemini",
         sources=("codex", "claude", "pi", "opencode", "grok"),
         db_path=tmp_path / "ccm.sqlite",
         pricing_path=pricing.path,

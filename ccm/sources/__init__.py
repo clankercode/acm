@@ -19,6 +19,7 @@ from .base import Source, Unit, UnitResult, project_label
 from .claude import ClaudeSource
 from .codex import CodexSource
 from .copilot import CopilotSource
+from .gemini import GeminiSource
 from .grok import GrokSource
 from .hermes import HermesSource
 from .kimi_cli import KimiCliSource
@@ -30,6 +31,7 @@ __all__ = [
     "ClaudeSource",
     "CodexSource",
     "CopilotSource",
+    "GeminiSource",
     "GrokSource",
     "HermesSource",
     "KimiCliSource",
@@ -53,6 +55,7 @@ _BUILDERS = {
     "kimi_cli": lambda s: KimiCliSource(s.kimi_dir),
     "hermes": lambda s: HermesSource(s.hermes_db),
     "copilot": lambda s: CopilotSource(s.copilot_db),
+    "gemini": lambda s: GeminiSource(s.gemini_dir),
 }
 
 

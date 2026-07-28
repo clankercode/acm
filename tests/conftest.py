@@ -998,6 +998,8 @@ UNPRICED_BY_DESIGN = {
     "mimo-v2-pro",
     # Shut down before a public rate existed.
     "gemini-3-pro-preview",
+    # Preview model with no published rate card.
+    "gemini-3-flash-preview",
     # Not a model: the scanner could not determine one. Priced at nothing
     # because there are no tokens attached to it.
     "unknown",

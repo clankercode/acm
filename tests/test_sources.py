@@ -20,6 +20,7 @@ from ccm.scanner import Scanner
 from ccm.sources import (
     ClaudeSource,
     CopilotSource,
+    GeminiSource,
     GrokSource,
     HermesSource,
     KimiCliSource,
@@ -957,6 +958,7 @@ def test_absent_corpora_are_skipped_not_errors(tmp_path, store):
         kimi_dir=tmp_path / "nope6",
         hermes_db=tmp_path / "nope7.db",
         copilot_db=tmp_path / "nope8.db",
+        gemini_dir=tmp_path / "nope9",
         sources=(
             "codex",
             "claude",
@@ -967,6 +969,7 @@ def test_absent_corpora_are_skipped_not_errors(tmp_path, store):
             "kimi_cli",
             "hermes",
             "copilot",
+            "gemini",
         ),
         db_path=tmp_path / "db.sqlite",
         pricing_path=tmp_path / "pricing.toml",
@@ -1076,3 +1079,71 @@ def test_filtering_by_client_partitions_the_totals(tmp_path, store, clock):
     assert sum(p["cost"] for p in parts) == pytest.approx(everything["cost"])
     assert sum(p["requests"] for p in parts) == everything["requests"]
     assert parts[0]["requests"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Gemini CLI
+
+
+def _write_gemini_session(root, session_name, entries):
+    """Write a minimal Gemini CLI session JSONL."""
+    import json
+    from pathlib import Path
+
+    d = Path(root) / session_name / "chats"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / f"{session_name}.jsonl"
+    with open(f, "w") as fh:
+        for e in entries:
+            fh.write(json.dumps(e) + "\n")
+    return f
+
+
+def test_gemini_parses_tokens_and_folds_thoughts(tmp_path, store):
+    """Gemini reports input/cached/output/thoughts; thoughts fold into output."""
+    _write_gemini_session(
+        tmp_path / "g",
+        "session-2026-05-30T16-08-abc",
+        [
+            {
+                "id": "msg-001",
+                "timestamp": "2026-05-30T16:08:52.560Z",
+                "type": "gemini",
+                "model": "gemini-3-flash-preview",
+                "tokens": {
+                    "input": 17553,
+                    "output": 33,
+                    "cached": 15917,
+                    "thoughts": 426,
+                    "tool": 0,
+                    "total": 18012,
+                },
+            }
+        ],
+    )
+    Scanner(store, sources=[GeminiSource(tmp_path / "g")]).scan_once()
+    (row,) = rows(store, "gemini")
+    assert row["input_tokens"] == 17553
+    assert row["cached_tokens"] == 15917
+    # thoughts folded into output
+    assert row["output_tokens"] == 33 + 426
+    assert row["reasoning_tokens"] == 426
+    assert row["model"] == "gemini-3-flash-preview"
+
+
+def test_gemini_deduplicates_on_id(tmp_path, store):
+    """Each API response is written twice (text + tool-call) with the same id."""
+    entry = {
+        "id": "dup-001",
+        "timestamp": "2026-05-30T16:09:00.000Z",
+        "type": "gemini",
+        "model": "gemini-3-flash-preview",
+        "tokens": {"input": 1000, "output": 10, "cached": 500, "thoughts": 0, "tool": 0, "total": 1010},
+    }
+    _write_gemini_session(
+        tmp_path / "g",
+        "session-2026-05-30T16-09-def",
+        [entry, entry],  # same id, same tokens
+    )
+    Scanner(store, sources=[GeminiSource(tmp_path / "g")]).scan_once()
+    assert len(rows(store, "gemini")) == 1

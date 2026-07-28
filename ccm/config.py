@@ -73,6 +73,7 @@ ALL_SOURCES = (
     "kimi_cli",
     "hermes",
     "copilot",
+    "gemini",
 )
 
 
@@ -116,6 +117,8 @@ class Settings:
     hermes_db: Path
     #: Copilot CLI keeps per-request usage in SQLite.
     copilot_db: Path
+    #: Gemini CLI chat sessions, one tree per project.
+    gemini_dir: Path
     #: Which of :data:`ALL_SOURCES` to scan.
     sources: tuple[str, ...]
 
@@ -166,6 +169,9 @@ class Settings:
             hermes_db=_env_path("CCM_HERMES_DB", Path.home() / ".hermes" / "state.db"),
             copilot_db=_env_path(
                 "CCM_COPILOT_DB", Path.home() / ".copilot" / "session-store.db"
+            ),
+            gemini_dir=_env_path(
+                "CCM_GEMINI_DIR", Path.home() / ".gemini" / "tmp"
             ),
             sources=_env_sources("CCM_SOURCES"),
             db_path=_env_path("CCM_DB", STATE_DIR / "ccm.sqlite"),
