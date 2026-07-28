@@ -18,6 +18,7 @@ from ..config import Settings
 from .base import Source, Unit, UnitResult, project_label
 from .claude import ClaudeSource
 from .codex import CodexSource
+from .copilot import CopilotSource
 from .grok import GrokSource
 from .hermes import HermesSource
 from .kimi_cli import KimiCliSource
@@ -28,6 +29,7 @@ from .pi import PiSource
 __all__ = [
     "ClaudeSource",
     "CodexSource",
+    "CopilotSource",
     "GrokSource",
     "HermesSource",
     "KimiCliSource",

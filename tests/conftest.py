@@ -866,6 +866,67 @@ def build_hermes_db(
     return path
 
 
+def build_copilot_db(
+    path: Path,
+    events: list[dict],
+    *,
+    session_id: str = "cop_test",
+    cwd: str = "/home/dev/project",
+    repository: str | None = "AmarooHQ/amaroo",
+    branch: str | None = "main",
+) -> Path:
+    """A minimal Copilot session-store.db with the columns the reader touches."""
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY, cwd TEXT, repository TEXT,
+            host_type TEXT, branch TEXT, summary TEXT,
+            created_at TEXT, updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS assistant_usage_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT,
+            turn_index INTEGER, agent_id TEXT, parent_tool_call_id TEXT,
+            model TEXT NOT NULL, input_tokens INTEGER, output_tokens INTEGER,
+            cache_read_tokens INTEGER, cache_write_tokens INTEGER,
+            reasoning_tokens INTEGER, total_nano_aiu INTEGER,
+            request_multiplier REAL, duration_ms INTEGER,
+            time_to_first_token_ms REAL, inter_token_latency_ms REAL,
+            initiator TEXT, api_endpoint TEXT, reasoning_effort TEXT,
+            finish_reason TEXT, content_filter_triggered INTEGER,
+            token_details_json TEXT, created_at TEXT
+        );
+        """
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO sessions (id, cwd, repository, branch)"
+        " VALUES (?, ?, ?, ?)",
+        (session_id, cwd, repository, branch),
+    )
+    for e in events:
+        conn.execute(
+            "INSERT OR REPLACE INTO assistant_usage_events (id, session_id, model,"
+            " input_tokens, output_tokens, cache_read_tokens,"
+            " cache_write_tokens, reasoning_tokens, reasoning_effort,"
+            " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                e.get("id"),
+                e.get("session_id", session_id),
+                e["model"],
+                e.get("fresh", 0),
+                e.get("output", 0),
+                e.get("cache_read", 0),
+                e.get("cache_write", 0),
+                e.get("reasoning", 0),
+                e.get("effort"),
+                e.get("created_at", "2026-07-11T03:48:42.951Z"),
+            ),
+        )
+    conn.commit()
+    conn.close()
+    return path
+
+
 @pytest.fixture
 def sessions_dir(tmp_path: Path) -> Path:
     d = tmp_path / "sessions" / "2026" / "07" / "01"

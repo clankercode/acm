@@ -19,6 +19,7 @@ from ccm.pricing import PricingTable, compute_tier
 from ccm.scanner import Scanner
 from ccm.sources import (
     ClaudeSource,
+    CopilotSource,
     GrokSource,
     HermesSource,
     KimiCliSource,
@@ -773,6 +774,104 @@ def test_hermes_rescanning_unchanged_rows_adds_nothing(tmp_path, store):
     scanner.scan_once()
     scanner.scan_once()
     assert len(rows(store, "hermes")) == 2
+
+
+# ---------------------------------------------------------------------------
+# Copilot CLI
+
+
+def test_copilot_keeps_the_prompt_whole(tmp_path, store):
+    """OpenAI convention: input_tokens already includes the cached part."""
+    from .conftest import build_copilot_db
+
+    db = build_copilot_db(
+        tmp_path / "cp.db",
+        [
+            {
+                "id": 1,
+                "model": "gpt-5.5",
+                "fresh": 4318,
+                "cache_read": 28160,
+                "output": 70,
+            }
+        ],
+    )
+
+    Scanner(store, sources=[CopilotSource(db)]).scan_once()
+    (row,) = rows(store, "copilot")
+    # input_tokens is NOT reassembled -- it is already the whole prompt.
+    assert row["input_tokens"] == 4318
+    assert row["cached_tokens"] == 28160
+    assert row["output_tokens"] == 70
+
+
+def test_copilot_reasoning_is_inside_output(tmp_path, store):
+    from .conftest import build_copilot_db
+
+    db = build_copilot_db(
+        tmp_path / "cp.db",
+        [{"id": 1, "model": "gpt-5.5", "fresh": 100, "output": 800, "reasoning": 404}],
+    )
+
+    Scanner(store, sources=[CopilotSource(db)]).scan_once()
+    (row,) = rows(store, "copilot")
+    # Reasoning is a subset of output, not an addend.
+    assert row["output_tokens"] == 800
+    assert row["reasoning_tokens"] == 404
+
+
+def test_copilot_records_effort(tmp_path, store):
+    from .conftest import build_copilot_db
+
+    db = build_copilot_db(
+        tmp_path / "cp.db",
+        [{"id": 1, "model": "gpt-5.4", "fresh": 100, "output": 5, "effort": "medium"}],
+    )
+
+    Scanner(store, sources=[CopilotSource(db)]).scan_once()
+    (row,) = rows(store, "copilot")
+    assert row["effort"] == "medium"
+
+
+def test_copilot_ingest_is_idempotent(tmp_path, store):
+    from .conftest import build_copilot_db
+
+    db = build_copilot_db(
+        tmp_path / "cp.db",
+        [
+            {"id": 1, "model": "gpt-5.5", "fresh": 10, "output": 1},
+            {"id": 2, "model": "gpt-5.5", "fresh": 20, "output": 2},
+        ],
+    )
+    scanner = Scanner(store, sources=[CopilotSource(db)])
+    scanner.scan_once()
+    scanner.scan_once()
+    assert len(rows(store, "copilot")) == 2
+
+
+def test_copilot_picks_up_new_rows(tmp_path, store):
+    from .conftest import build_copilot_db
+
+    path = tmp_path / "cp.db"
+    build_copilot_db(
+        path,
+        [{"id": 1, "model": "gpt-5.5", "fresh": 10, "output": 1}],
+    )
+    source = CopilotSource(path)
+    scanner = Scanner(store, sources=[source])
+    scanner.scan_once()
+    assert len(rows(store, "copilot")) == 1
+
+    build_copilot_db(
+        path,
+        [
+            {"id": 1, "model": "gpt-5.5", "fresh": 10, "output": 1},
+            {"id": 2, "model": "gpt-5.4", "fresh": 20, "output": 2},
+        ],
+    )
+    scanner.scan_once()
+    got = {r["dk"]: r for r in rows(store, "copilot")}
+    assert set(got) == {"1", "2"}
 
 
 # ---------------------------------------------------------------------------

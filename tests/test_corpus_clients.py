@@ -23,6 +23,7 @@ from ccm.pricing import PricingTable, compute_tier
 from ccm.scanner import Scanner
 from ccm.sources import (
     ClaudeSource,
+    CopilotSource,
     GrokSource,
     HermesSource,
     KimiCliSource,
@@ -41,6 +42,7 @@ GROK = Path.home() / ".grok" / "sessions"
 KIMI_CODE = Path.home() / ".kimi-code" / "sessions"
 KIMI_CLI = Path.home() / ".kimi" / "sessions"
 HERMES = Path.home() / ".hermes" / "state.db"
+COPILOT = Path.home() / ".copilot" / "session-store.db"
 REPO_PRICING = Path(__file__).resolve().parent.parent / "pricing.toml"
 
 pytestmark = [
@@ -54,6 +56,7 @@ pytestmark = [
             or KIMI_CODE.exists()
             or KIMI_CLI.exists()
             or HERMES.exists()
+            or COPILOT.exists()
         ),
         reason="no non-Codex client histories on this machine",
     ),
@@ -76,6 +79,8 @@ def available_sources():
         sources.append(KimiCliSource(KIMI_CLI))
     if HERMES.exists():
         sources.append(HermesSource(HERMES))
+    if COPILOT.exists():
+        sources.append(CopilotSource(COPILOT))
     return sources
 
 
@@ -640,6 +645,50 @@ def test_hermes_matches_an_independent_implementation(scanned):
         assert mine["cached_tokens"] == ref[1], key
         assert mine["cache_write_tokens"] == ref[2], key
         assert mine["output_tokens"] == ref[3], key
+
+
+def reference_copilot() -> dict:
+    """A second, deliberately naive implementation of the Copilot rules."""
+    rows: dict[str, tuple] = {}
+    raw = 0
+    conn = sqlite3.connect(f"file:{COPILOT}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    for row in conn.execute(
+        "SELECT id, model, input_tokens, output_tokens, cache_read_tokens,"
+        " cache_write_tokens, reasoning_tokens"
+        " FROM assistant_usage_events"
+    ):
+        raw += 1
+        rows[str(row["id"])] = (
+            row["input_tokens"] or 0,
+            row["cache_read_tokens"] or 0,
+            row["cache_write_tokens"] or 0,
+            row["output_tokens"] or 0,
+            row["reasoning_tokens"] or 0,
+        )
+    conn.close()
+    return {"requests": rows, "raw": raw}
+
+
+@pytest.mark.skipif(not COPILOT.exists(), reason="no Copilot history")
+def test_copilot_matches_an_independent_implementation(scanned):
+    """The gate: identical rows in, identical deduped requests out."""
+    store, _, _ = scanned
+    reference = reference_copilot()
+    ours = {
+        r["dk"]: r
+        for r in store.query("SELECT * FROM requests WHERE source = 'copilot'")
+    }
+
+    assert len(ours) == len(reference["requests"])
+    assert set(ours) == set(reference["requests"])
+    for key, ref in reference["requests"].items():
+        mine = ours[key]
+        assert mine["input_tokens"] == ref[0], key
+        assert mine["cached_tokens"] == ref[1], key
+        assert mine["cache_write_tokens"] == ref[2], key
+        assert mine["output_tokens"] == ref[3], key
+        assert mine["reasoning_tokens"] == ref[4], key
 
 
 def test_prompt_subsets_never_exceed_the_prompt(scanned):
