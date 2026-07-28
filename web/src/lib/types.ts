@@ -39,6 +39,7 @@ export interface SourceScan {
   bytes_total: number
   bytes_done: number
   raw_events: number
+  rows: number
   new_requests: number
   errors: number
 }
@@ -58,9 +59,25 @@ export interface ScanState {
   bytes_per_sec: number
   eta_seconds: number | null
   duplicate_fraction: number
+  /** Rows of session history read, cumulative for this pass. */
+  rows: number
+  /** Rows read per second, over the last few seconds only. */
+  rows_per_sec: number
   errors: number
   last_error: string | null
+  /** Distinct failures this pass, loudest first. Capped, so the counts can sum
+   *  to less than `errors`; the difference is unitemised, not missing. */
+  error_groups: ErrorGroup[]
   sources: SourceScan[]
+}
+
+export interface ErrorGroup {
+  message: string
+  count: number
+  sources: string[]
+  first_at: number
+  last_at: number
+  last_file: string | null
 }
 
 export interface Dimensions {

@@ -100,6 +100,7 @@ class OpenCodeSource(Source):
             return UnitResult(error=str(exc))
         conn.close()
 
+        out.rows = len(rows)
         for row in rows:
             out.bytes_read += len(row["data"] or "")
             high_water = max(high_water, int(row["time_updated"] or 0))
@@ -160,7 +161,9 @@ class OpenCodeSource(Source):
         # write every poll for the life of the process, so only write when the
         # high-water mark actually moved.
         if high_water == since:
-            return UnitResult(raw_events=out.raw_events, bytes_read=out.bytes_read)
+            return UnitResult(
+                raw_events=out.raw_events, bytes_read=out.bytes_read, rows=out.rows
+            )
 
         written = store.write_batch(
             requests=out.requests,
@@ -186,6 +189,7 @@ class OpenCodeSource(Source):
             raw_events=out.raw_events,
             bytes_read=out.bytes_read,
             new_requests=written.get("requests", 0),
+            rows=out.rows,
         )
 
     def _raw_events(self, store: Store) -> int:

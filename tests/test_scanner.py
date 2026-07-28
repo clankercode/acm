@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 import os
+import time
 from datetime import timedelta
 from pathlib import Path
 
-from ccm.scanner import Scanner, iter_rollouts, parse_ts
+from ccm.scanner import (
+    MAX_ERROR_KINDS,
+    ROW_RATE_WINDOW,
+    CodexSource,
+    ScanProgress,
+    Scanner,
+    iter_rollouts,
+    parse_ts,
+)
 from ccm.store import Store
 
 from .conftest import Thread
@@ -353,3 +362,98 @@ def test_offset_advances_only_over_complete_lines(store, sessions_dir, clock):
     offset = store.one("SELECT offset FROM files")["offset"]
     assert offset == full.rindex("\n", 0, len(full) - 3) + 1
     assert offset < os.path.getsize(path)
+
+
+def test_rows_count_every_line_not_just_token_events(store, sessions_dir, clock):
+    """The liveness number counts lines read, not token events found.
+
+    Most of a corpus is not token counts -- during a real pass the event counter
+    sat still through thousands of files that were being consumed perfectly well,
+    so a rate built on it reported a stall that was not happening.
+    """
+    thread = build(sessions_dir, clock)
+    thread.write(sessions_dir)
+    progress = Scanner(store, sessions_dir.parents[2]).scan_once()
+
+    assert progress.rows == len([line for line in thread.text().splitlines() if line])
+    assert progress.rows > progress.raw_events
+    assert progress.sources["codex"].rows == progress.rows
+
+
+def test_row_rate_measures_only_the_recent_window():
+    progress = ScanProgress()
+    now = time.time()
+    progress.samples.append((now - 1.0, 0))
+    progress.rows = 400
+    progress.samples.append((now, 400))
+    assert 300 < progress.rows_per_sec < 500
+
+
+def test_row_rate_decays_to_zero_when_nothing_is_being_read():
+    """A finished or stalled pass must not leave a number that looks live."""
+    progress = ScanProgress()
+    now = time.time()
+    progress.rows = 5000
+    progress.samples.append((now - ROW_RATE_WINDOW * 3, 0))
+    progress.samples.append((now - ROW_RATE_WINDOW * 2, 5000))
+    assert progress.rows_per_sec == 0.0
+
+
+def test_errors_are_grouped_by_kind(store, sessions_dir, clock):
+    """The header shows a count; the dropdown behind it shows kinds.
+
+    A reader that trips over one malformed line trips over it in every file that
+    carries one, so sightings are folded together -- a dozen identical messages
+    say less than one message with a dozen beside it.
+    """
+    for index in range(3):
+        build(
+            sessions_dir, clock, rollout_id=f"r{index}", session_id=f"s{index}"
+        ).write(sessions_dir)
+
+    class Broken(CodexSource):
+        def ingest(self, store, unit):
+            raise RuntimeError("'str' object has no attribute 'get'")
+
+    progress = Scanner(
+        store, sources=[Broken(sessions_dir.parents[2])]
+    ).scan_once()
+
+    assert progress.errors == 3
+    groups = progress.as_dict()["error_groups"]
+    assert len(groups) == 1
+    assert groups[0]["count"] == 3
+    assert "no attribute" in groups[0]["message"]
+    assert groups[0]["sources"] == ["codex"]
+    # An example to go and look at, and the client that hit it.
+    assert groups[0]["last_file"].endswith(".jsonl")
+    # A failed file commits no cursor, so its bytes stay pending for next pass.
+    assert progress.bytes_done == 0
+
+
+def test_error_kinds_are_capped_and_the_shortfall_stays_visible():
+    """The dropdown is bounded; the count it hangs off is not.
+
+    The UI shows `errors` minus what it can itemise as "+N more", so the two must
+    disagree by exactly what was dropped rather than quietly matching.
+    """
+    progress = ScanProgress()
+    for index in range(MAX_ERROR_KINDS + 5):
+        progress.note_error(f"distinct failure number {index}")
+
+    payload = progress.as_dict()
+    assert payload["errors"] == MAX_ERROR_KINDS + 5
+    assert len(payload["error_groups"]) == MAX_ERROR_KINDS
+    itemised = sum(group["count"] for group in payload["error_groups"])
+    assert payload["errors"] - itemised == 5
+
+
+def test_each_pass_reports_its_own_errors_and_rate(store, sessions_dir, clock):
+    """Both are per-pass, like every other counter in the progress payload."""
+    build(sessions_dir, clock).write(sessions_dir)
+    scanner = Scanner(store, sessions_dir.parents[2])
+    scanner.progress.note_error("left over from an earlier pass")
+
+    progress = scanner.scan_once()
+    assert progress.errors == 0
+    assert progress.as_dict()["error_groups"] == []

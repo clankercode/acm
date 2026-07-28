@@ -346,7 +346,7 @@ class GrokSource(JsonlSource):
             parent_id=self._parents.get(path.parent.name),
         )
         out = ParseOutput(offset=start_offset)
-        out.bytes_read, out.offset, out.error = read_new_lines(
+        out.bytes_read, out.offset, out.error, out.rows = read_new_lines(
             path, start_offset, lambda line: parser.feed(line, out)
         )
         out.session = parser.session_row()

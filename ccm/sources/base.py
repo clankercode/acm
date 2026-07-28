@@ -219,6 +219,8 @@ class UnitResult:
     bytes_read: int = 0
     new_requests: int = 0
     error: str | None = None
+    #: Lines (or database rows) read, whether or not they carried token counts.
+    rows: int = 0
 
 
 @dataclass
@@ -233,6 +235,8 @@ class ParseOutput:
     bytes_read: int = 0
     offset: int = 0
     error: str | None = None
+    #: Lines (or database rows) read, whether or not they carried token counts.
+    rows: int = 0
     #: Extra ``files`` columns the parser needs back to resume mid-file.
     carry: dict = field(default_factory=dict)
 
@@ -268,15 +272,20 @@ class Source:
 
 def read_new_lines(
     path: Path, start_offset: int, feed: Callable[[bytes], None]
-) -> tuple[int, int, str | None]:
+) -> tuple[int, int, str | None, int]:
     """Feed every complete line from ``start_offset`` onwards.
 
-    Returns ``(bytes_read, new_offset, error)``. The offset advances only over
-    bytes that formed complete lines, so a record still being written is re-read
-    intact next pass rather than being parsed in half.
+    Returns ``(bytes_read, new_offset, error, rows)``. The offset advances only
+    over bytes that formed complete lines, so a record still being written is
+    re-read intact next pass rather than being parsed in half.
+
+    ``rows`` counts the lines handed to ``feed``, which is the honest measure of
+    how much history was read: only a small fraction of them carry token counts,
+    so an event count says nothing about whether the reader is moving.
     """
     pending = b""
     bytes_read = 0
+    rows = 0
     error: str | None = None
     try:
         with path.open("rb") as fh:
@@ -294,10 +303,11 @@ def read_new_lines(
                 block, pending = data[: nl + 1], data[nl + 1 :]
                 for line in block.splitlines():
                     if line:
+                        rows += 1
                         feed(line)
     except OSError as exc:
         error = str(exc)
-    return bytes_read, start_offset + bytes_read - len(pending), error
+    return bytes_read, start_offset + bytes_read - len(pending), error, rows
 
 
 class JsonlSource(Source):
@@ -370,6 +380,7 @@ class JsonlSource(Source):
             bytes_read=out.bytes_read,
             new_requests=written.get("requests", 0),
             error=out.error,
+            rows=out.rows,
         )
 
     def file_state(

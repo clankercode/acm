@@ -119,7 +119,10 @@ export function TopBar(props: Props) {
             {compact(state.quality.deduped_requests, 1)} requests ·{' '}
             {state.quality.replay_ratio.toFixed(1)}× replay
             {scan && scan.errors > 0 && (
-              <span className="bad"> · {scan.errors} errors</span>
+              <>
+                {' · '}
+                <ErrorPopover scan={scan} />
+              </>
             )}
           </span>
         )}
@@ -149,6 +152,22 @@ export function TopBar(props: Props) {
                 <span className="scan-meta scan-rate">
                   {bytes(scan!.bytes_done)} / {bytes(scan!.bytes_total)} ·{' '}
                   {(scan!.bytes_per_sec / 1e6).toFixed(0)} MB/s
+                  {/* Windowed, unlike the MB/s beside it, which is the pass
+                      average. Rows rather than token events, because most lines
+                      carry no token counts and an event rate reads zero through
+                      thousands of files that are being consumed perfectly well.
+                      Titled with the file it is currently reading, since that is
+                      what the number describes. */}
+                  <span
+                    title={
+                      'Rows of session history read per second, averaged over the' +
+                      ' last few seconds' +
+                      (scan!.current_file ? `\n\nreading ${scan!.current_file}` : '')
+                    }
+                  >
+                    {' · '}
+                    {compact(scan!.rows_per_sec, 1)} rows/s
+                  </span>
                   {scan!.eta_seconds != null && ` · ${seconds(scan!.eta_seconds)} left`}
                 </span>
               )}
@@ -305,6 +324,102 @@ export function TopBar(props: Props) {
         )}
       </div>
     </header>
+  )
+}
+
+/**
+ * The error count, with what went wrong a hover away.
+ *
+ * A count on its own is unactionable -- eleven errors could be one bad reader
+ * or eleven bad files -- and the whole point of surfacing it in the header is
+ * that a scan which silently skipped files is a scan whose totals are short.
+ * Grouping is done server-side by message, so what lands here is already kinds
+ * rather than sightings.
+ *
+ * Opens on hover and on keyboard focus, and clicking pins it open: reading a
+ * stack of paths with the mouse held still over a 3-line target is a fight
+ * nobody should have with a tooltip.
+ */
+function ErrorPopover({ scan }: { scan: ScanState }) {
+  const [hovered, setHovered] = useState(false)
+  const [pinned, setPinned] = useState(false)
+  const box = useRef<HTMLSpanElement | null>(null)
+  const open = hovered || pinned
+
+  useEffect(() => {
+    if (!pinned) return
+    const onDown = (e: MouseEvent) => {
+      if (box.current && !box.current.contains(e.target as Node)) setPinned(false)
+    }
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setPinned(false)
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [pinned])
+
+  const groups = scan.error_groups ?? []
+  // The group list is capped server-side, so the counts can legitimately sum to
+  // less than the total. Saying so beats a dropdown that quietly disagrees with
+  // the number that opened it.
+  const itemised = groups.reduce((n, g) => n + g.count, 0)
+  const unitemised = Math.max(scan.errors - itemised, 0)
+
+  return (
+    <span
+      className="errpop"
+      ref={box}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <button
+        type="button"
+        className="bad errpop-trigger"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onFocus={() => setHovered(true)}
+        onBlur={() => setHovered(false)}
+        onClick={() => setPinned((v) => !v)}
+      >
+        {scan.errors} {scan.errors === 1 ? 'error' : 'errors'}
+      </button>
+      {open && (
+        <div className="errpop-menu" role="dialog" aria-label="Scan errors">
+          <div className="errpop-head">
+            {scan.errors} {scan.errors === 1 ? 'error' : 'errors'} this pass ·{' '}
+            {groups.length} {groups.length === 1 ? 'kind' : 'kinds'}
+          </div>
+          {groups.length === 0 && <div className="errpop-item">no detail recorded</div>}
+          {groups.map((g) => (
+            <div className="errpop-item" key={g.message}>
+              <div className="errpop-msg">
+                <span className="errpop-count">{g.count}×</span> {g.message}
+              </div>
+              {g.last_file && (
+                <div className="errpop-file" title={g.last_file}>
+                  {g.sources.length > 0 && (
+                    <span className="errpop-source">{g.sources.join(', ')}</span>
+                  )}
+                  {g.last_file.split('/').pop()}
+                </div>
+              )}
+            </div>
+          ))}
+          {unitemised > 0 && (
+            <div className="errpop-item errpop-more">
+              + {unitemised} more, in kinds beyond the {groups.length} listed
+            </div>
+          )}
+          <div className="errpop-foot">
+            A failed file keeps its old cursor, so its bytes are missing from the
+            totals and the next pass retries it. A kind that survives every pass
+            is a reader bug rather than a transient.
+          </div>
+        </div>
+      )}
+    </span>
   )
 }
 

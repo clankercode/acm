@@ -565,6 +565,85 @@ input.inline-name:hover { border-color: var(--border); }
 
 .swatch { width: 8px; height: 8px; display: inline-block; flex: none; }
 
+/* ---------- scan errors ---------- */
+
+.errpop { position: relative; }
+
+/* Sits inside a run of text in the header, so it inherits rather than looking
+   like a control. The count is the only part that reads as a link. */
+.errpop-trigger {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: help;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+.errpop-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.errpop-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  /* Anchored to the trigger's right edge, not its left: the chip sits well into
+     the right half of the header, and a panel this wide opening rightwards runs
+     straight off the viewport. */
+  right: 0;
+  z-index: 70;
+  width: min(34rem, calc(100vw - 2rem));
+  max-height: 60vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--page);
+  border: var(--rule) solid var(--border-strong);
+  box-shadow: 0 8px 24px -12px rgb(0 0 0 / .45);
+  /* The header keeps its status text on one line; a panel of prose and long
+     paths must not inherit that, or it scrolls sideways instead of wrapping. */
+  white-space: normal;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: auto;
+}
+
+.errpop-head {
+  padding: var(--space-2);
+  border-bottom: var(--rule) solid var(--border);
+  font: var(--type-label);
+  color: var(--text-secondary);
+}
+
+.errpop-item {
+  padding: var(--space-2);
+  font: var(--type-data);
+  color: var(--text-secondary);
+}
+.errpop-item + .errpop-item { border-top: var(--rule) solid var(--border); }
+
+.errpop-msg { color: var(--text-primary); overflow-wrap: anywhere; }
+.errpop-count { color: var(--critical); font-variant-numeric: tabular-nums; }
+
+.errpop-file {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+/* Which client hit it, when more than one can. */
+.errpop-source { color: var(--text-secondary); margin-right: var(--space-2); }
+
+.errpop-more { color: var(--text-muted); }
+
+.errpop-foot {
+  padding: var(--space-2);
+  border-top: var(--rule) solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font: var(--type-label);
+}
+
 /* ---------- metric strip ---------- */
 
 .kpis {

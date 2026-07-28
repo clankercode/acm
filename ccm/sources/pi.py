@@ -190,7 +190,7 @@ class PiSource(JsonlSource):
     def parse(self, path: Path, cursor: dict | None, start_offset: int) -> ParseOutput:
         parser = PiParser(path, cursor)
         out = ParseOutput(offset=start_offset)
-        out.bytes_read, out.offset, out.error = read_new_lines(
+        out.bytes_read, out.offset, out.error, out.rows = read_new_lines(
             path, start_offset, lambda line: parser.feed(line, out)
         )
         out.session = parser.session_row()
