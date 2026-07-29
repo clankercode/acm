@@ -15,9 +15,21 @@ dashboard of token usage, prompt-cache performance and notional cost.
 | Hermes | `~/.hermes/state.db` | SQLite (per-session+model) |
 | Copilot CLI | `~/.copilot/session-store.db` | SQLite (per-request) |
 | Gemini CLI | `~/.gemini/tmp` | session JSONL |
+| cursor-agent (Cursor CLI) | `/tmp/cursor-agent-logs-*`, mirrored to `~/.cache/ccm/cursor-logs` | `analytics.track` event log |
 
 A client with no history on this machine is skipped, so the same build runs
 whether one is installed or all of them.
+
+cursor-agent is a deliberately lower-grade source than the others. It persists
+no usage to its transcript store; the only place per-request token counts
+survive is the `analytics.track` events in its debug logs, and those carry a
+single `estimated_tokens` figure — the turn's full input context — with no
+output, cache-read or cache-write breakdown. Its rows therefore price the turn
+as if it were all input and under-count, which is fine for a best-effort source
+as long as nobody mistakes the number for precise. Because `/tmp` rotates the
+logs (newest-50, ~7-day window), the source mirrors them into
+`~/.cache/ccm/cursor-logs` at most once an hour and reads the mirror, so
+history survives a rescan; no external daemon or hook is required.
 
 The metric it leads with is **effective rate**: total cost divided by input
 tokens processed, in dollars per million. It folds cache hit rate, context tier,
@@ -62,6 +74,7 @@ Overrides: `--sessions`, `--db`, `--pricing`, or the environment variables
 `CCM_SESSIONS_DIR`, `CCM_CLAUDE_DIR`, `CCM_PI_DIR`, `CCM_OPENCODE_DB`,
 `CCM_GROK_DIR`, `CCM_KIMI_CODE_DIR`, `CCM_KIMI_DIR`, `CCM_HERMES_DB`,
 `CCM_COPILOT_DB`, `CCM_GEMINI_DIR`,
+`CCM_CURSOR_AGENT_DIR`, `CCM_CURSOR_AGENT_CAPTURE_INTERVAL`,
 `CCM_SOURCES`, `CCM_DB`, `CCM_PRICING`, `CCM_REFERENCE`, `CCM_HOST`, `CCM_PORT`,
 `CCM_POLL`, `CCM_CHECKOUT`, `CCM_UPDATE_FROM_LAN`.
 `CCM_SOURCES=codex,claude` restricts the scan to named clients.
@@ -267,9 +280,9 @@ line carries an event id, so it deduplicates on that alone.
 One rule covers them all. A request is identified by `(source, dk)`, where each
 reader mints `dk` from whatever its format guarantees: cumulative token counters
 for Codex, the API message id for Claude Code, the response id for Pi, the row
-id for OpenCode, the event id for Grok. A `rank` column then decides which
-sighting of a duplicate wins — highest rank, with the earliest timestamp
-breaking ties.
+id for OpenCode, the event id for Grok, the invocation id for cursor-agent. A
+`rank` column then decides which sighting of a duplicate wins — highest rank,
+with the earliest timestamp breaking ties.
 
 That single comparison expresses both policies. Codex leaves rank at 0, which
 reduces it to "earliest wins" — correct, because a replay carries the replay's
@@ -317,11 +330,13 @@ nothing worth storing.
 
 Two tiers apply. Requests whose prompt exceeds `long_context_threshold` bill at
 long-context rates — on the GPT-5.6 family, double the input rate and 1.5x the
-output rate above 200k; on MiniMax-M3, double everything above 512k. This is not
+output rate above 272k; on MiniMax-M3, double everything above 512k. This is not
 a rounding error: over the Codex corpus 25% of requests but **42% of input
 tokens** land in the long tier, and ignoring it understates spend by 42%. Claude
 4.6 and later carry their full 1M window at standard pricing and so have no long
-tier at all.
+tier at all. The threshold is a billing boundary, not the context-window size —
+[docs/long-context-thresholds.md](docs/long-context-thresholds.md) records what
+each vendor publishes and exactly where the line falls per model.
 
 Because the tier is a property of the individual request, it is part of the
 rollup key. Buckets are homogeneous in model *and* tier, so costing a bucket's
@@ -378,13 +393,21 @@ ccm/sources/claude.py    transcript JSONL, streaming rewrites, cache-write TTLs
 ccm/sources/pi.py        session JSONL, client-reported costs
 ccm/sources/opencode.py  SQLite, mutable rows
 ccm/sources/grok.py      session update JSONL, turn-level usage, gateway names
+ccm/sources/kimi_code.py wire JSONL, one file per agent
+ccm/sources/kimi_cli.py  wire JSONL
+ccm/sources/hermes.py    SQLite, per-session-and-model rows
+ccm/sources/copilot.py   SQLite, per-request rows
+ccm/sources/gemini.py    session JSONL
+ccm/sources/cursor_agent.py  debug-log analytics events, mirrored out of /tmp
 ccm/scanner.py           the driver: plan, ingest, report progress
 ccm/aggregate.py         rollup maintenance and every query the UI makes
+ccm/cache_decay.py       cache-TTL inference from inter-request gaps
 ccm/portable.py          export/import bundles, machine labels
 ccm/modelsdev.py         cached reference prices, for cross-checking the table
 ccm/engine.py            background scan loop and SSE fan-out
 ccm/watcher.py           inotify with a polling fallback
 ccm/server.py            REST + server-sent events
+ccm/selfupdate.py        pull, rebuild, reinstall, restart from the dashboard
 web/                     Vite + React + TypeScript + uPlot
 justfile                 setup, build, install, service, release
 packaging/               systemd unit, wheel smoke test, release notes
@@ -411,6 +434,26 @@ month blank; every other filter still applies, because those say what is being
 counted rather than when. Cells are shaded from zero rather than from the
 quietest day — except for cache *rate*, which is a rate and would otherwise be
 one flat colour across a corpus that sits in the high nineties all month.
+
+Two more views look at shape rather than totals. A **heatmap series** plots hour
+against weekday in four panels — cache rate, effective rate, spend and requests
+— all fed by a single fetch, so a quiet Tuesday at 3am is visible next to the
+weekday peak. A **density series** plots cache rate, effective rate, spend and
+output tokens against prompt size, each request a point; imported machines draw
+from the hourly rollup instead (their per-request rows deliberately do not
+travel), so each bucket becomes a point weighted by its request count.
+
+**Cache expiry is inferred, not configured.** Providers keep a warm prompt
+prefix for a fixed time-to-live and then evict it, and eviction is not something
+any client reports — but within a session, the fraction of the previous
+request's prompt still cached at the next request decays as the idle gap between
+them grows, and a cliff in that retention-versus-gap curve marks the TTL.
+`/api/cache-decay` computes the curve per client from the stored requests. On
+the live database Codex shows a single cliff at 5–10 minutes; Claude shows two,
+at ~5 minutes and ~1 hour, matching the two cache-write tiers it bills. The
+measurement has known blind spots, stated rather than hidden: the gap is idle
+time within one session, not provider-side eviction under sharing, and context
+compaction masquerades as expiry, so retention is a lower bound.
 
 `repo` is a normalised project label rather than a git remote. Only Codex
 records a remote, and it records two different ones for the same working tree,
@@ -505,8 +548,8 @@ that existed at start-up and each new day creates one.
 ## Tests
 
 ```
-just test                     # 191 unit and integration tests, ~10s
-just test-corpus              # 28 tests against the real corpora, ~44s
+just test                     # 232 unit and integration tests, ~10s
+just test-corpus              # 34 tests against the real corpora, ~45s
 just check                    # what CI runs: tests, tsc, and a wheel that must serve
 ```
 
@@ -550,7 +593,9 @@ From every corpus at time of writing (927 files, 4.1 GB, 2026-07-05 onward):
 OpenCode's zero is real, not missing: `big-pickle` and `deepseek-v4-flash-free`
 are free during the OpenCode Zen beta, and are priced at an explicit $0 rather
 than left unpriced. Grok's two rows are two turns, not two API calls — it had
-only just been installed, and one of those turns covered two calls.
+only just been installed, and one of those turns covered two calls. The newer
+clients (Kimi Code, Kimi CLI, Hermes, Copilot CLI, Gemini CLI, cursor-agent)
+joined after this snapshot was taken, so they have no columns in it.
 
 Two things the dashboard is built to surface:
 
@@ -566,14 +611,20 @@ Two things the dashboard is built to surface:
 Rates were taken from each vendor's published pricing page and cross-checked;
 every entry in `pricing.toml` carries its `source`, and a test asserts that none
 is missing. Anything inferred rather than published is marked `estimated` and
-flagged in the Data Quality panel — currently only the cached rate for
-`grok-composer-2.5-fast`, which affects a single request.
+flagged in the Data Quality panel — currently the cached rate for
+`grok-composer-2.5-fast`, which affects a single request, and the whole
+`glm-4.5` card, which inherits GLM-4.7's rates until Z.ai publishes a separate
+one.
 
 `pricing.toml` stays the source of truth, but it has a standing second opinion:
 the **Reference prices** panel fetches [models.dev](https://models.dev) on
 demand, caches it to `data/models-dev.json`, and holds every configured rate
-against it. At the time of writing all 18 models agree exactly on input, cached
-and output; one (`grok-composer-2.5-fast`) is not listed there.
+against it. At the time of writing the table prices 44 models, of which
+models.dev lists 39. Most agree exactly on input, cached and output; the panel
+flags the rest rather than letting them pass silently — currently `grok-4.5`'s
+cached rate and `glm-5-turbo`'s input and output differ on categories with real
+traffic, and five models (mostly internal xAI aliases) are not listed there at
+all.
 
 The panel distinguishes a difference that could change a figure from one that
 cannot. models.dev quotes a cache-write rate for the OpenAI models — its house
@@ -584,3 +635,10 @@ table, which is the only failure mode that matters for a check like this.
 
 Fetching is manual and offline-safe: an unreachable network leaves the cache
 intact and the comparison merely goes stale.
+
+## License
+
+Public domain. Use it under the [Unlicense](https://unlicense.org) **or**
+[CC0-1.0](https://creativecommons.org/publicdomain/zero/1.0/), at your option —
+both texts are in [LICENSE](LICENSE). The bundled fonts under
+`web/public/fonts/` keep their own licenses (SIL OFL), which sit beside them.
