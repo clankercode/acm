@@ -88,8 +88,8 @@ jobs:
 
       - name: Build the wheel and sdist
         run: |
-          rm -rf ccm/_web dist
-          cp -r web/dist ccm/_web
+          rm -rf acm/_web dist
+          cp -r web/dist acm/_web
           uv build
 
       # A wheel that builds but cannot serve is the failure worth catching, so

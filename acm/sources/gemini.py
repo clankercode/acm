@@ -5,7 +5,7 @@ Each project gets a directory under ``tmp``; inside it, ``chats/`` holds one
 JSONL with a line per message.
 
 Token usage rides on ``type == "gemini"`` lines in a ``tokens`` object whose
-keys map cleanly to CCM's convention: ``input`` is the whole prompt (it grows
+keys map cleanly to ACM's convention: ``input`` is the whole prompt (it grows
 within a session as context accumulates), ``cached`` is the subset served from
 the context cache, ``output`` is the visible response, and ``thoughts`` are
 reasoning tokens billed at the output tier. The identity

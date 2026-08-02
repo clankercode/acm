@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prove a built wheel runs on a machine that has nothing else on it.
 #
-#   packaging/smoke-test.sh dist/codex_cache_monitor-0.1.0-py3-none-any.whl
+#   packaging/smoke-test.sh dist/agent_cache_monitor-0.1.0-py3-none-any.whl
 #
 # Installs the wheel into a throwaway venv under a throwaway HOME, so the
 # dashboard it serves and the state it writes can only have come out of the
@@ -15,9 +15,9 @@ trap 'rm -rf "$root"' EXIT
 
 uv venv --quiet "$root/venv"
 uv pip install --quiet --python "$root/venv/bin/python" "$wheel"
-ccm="$root/venv/bin/ccm"
+acm="$root/venv/bin/acm"
 
-# Installing happens first so that uv still has its usual cache; only ccm runs
+# Installing happens first so that uv still has its usual cache; only acm runs
 # under the throwaway HOME. No corpora exist there, so every client is skipped
 # and the scan finds nothing -- what is under test is that the program runs.
 export HOME="$root/home"
@@ -28,14 +28,14 @@ mkdir -p "$HOME"
 # and agent harnesses set these.
 unset XDG_STATE_HOME XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME
 
-echo "== ccm scan"
-"$ccm" scan -q
+echo "== acm scan"
+"$acm" scan -q
 
-test -f "$HOME/.config/ccm/pricing.toml" || { echo "no rate table was written"; exit 1; }
-test -f "$HOME/.local/state/ccm/ccm.sqlite" || { echo "no database was written"; exit 1; }
+test -f "$HOME/.config/acm/pricing.toml" || { echo "no rate table was written"; exit 1; }
+test -f "$HOME/.local/state/acm/acm.sqlite" || { echo "no database was written"; exit 1; }
 
-echo "== ccm serve"
-CCM_HOST=127.0.0.1 CCM_PORT="$port" "$ccm" serve --no-watch >"$root/serve.log" 2>&1 &
+echo "== acm serve"
+ACM_HOST=127.0.0.1 ACM_PORT="$port" "$acm" serve --no-watch >"$root/serve.log" 2>&1 &
 pid=$!
 trap 'kill $pid 2>/dev/null || true; rm -rf "$root"' EXIT
 

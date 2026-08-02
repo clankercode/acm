@@ -15,7 +15,7 @@ dashboard of token usage, prompt-cache performance and notional cost.
 | Hermes | `~/.hermes/state.db` | SQLite (per-session+model) |
 | Copilot CLI | `~/.copilot/session-store.db` | SQLite (per-request) |
 | Gemini CLI | `~/.gemini/tmp` | session JSONL |
-| cursor-agent (Cursor CLI) | `/tmp/cursor-agent-logs-*`, mirrored to `~/.cache/ccm/cursor-logs` | `analytics.track` event log |
+| cursor-agent (Cursor CLI) | `/tmp/cursor-agent-logs-*`, mirrored to `~/.cache/acm/cursor-logs` | `analytics.track` event log |
 
 A client with no history on this machine is skipped, so the same build runs
 whether one is installed or all of them.
@@ -28,7 +28,7 @@ output, cache-read or cache-write breakdown. Its rows therefore price the turn
 as if it were all input and under-count, which is fine for a best-effort source
 as long as nobody mistakes the number for precise. Because `/tmp` rotates the
 logs (newest-50, ~7-day window), the source mirrors them into
-`~/.cache/ccm/cursor-logs` at most once an hour and reads the mirror, so
+`~/.cache/acm/cursor-logs` at most once an hour and reads the mirror, so
 history survives a rescan; no external daemon or hook is required.
 
 The metric it leads with is **effective rate**: total cost divided by input
@@ -58,28 +58,46 @@ loopback; the startup banner prints both URLs. Every corpus is opened
 `just` with no arguments lists everything; see [`just` recipes](#just-recipes)
 below for the full set, and [RELEASE.md](RELEASE.md) for the release procedure.
 
+## Upgrading from ccm
+
+If you installed the previous `ccm` tool, the new `acm` automatically migrates
+your state on first run: `~/.local/state/ccm`, `~/.config/ccm`, and
+`~/.cache/ccm` are renamed to their `acm` equivalents, including the database
+(`ccm.sqlite` → `acm.sqlite`). Your pricing table and env file are preserved.
+
+To clean up the old install:
+
+```
+uv tool uninstall codex-cache-monitor
+systemctl --user disable --now ccm.service   # if you used the service
+rm ~/.config/systemd/user/ccm.service
+```
+
+Environment variables renamed from `CCM_*` to `ACM_*`; the old names still work
+as a fallback for now.
+
 ## Commands
 
 ```
-ccm scan            # scan every client, print a summary, exit
-ccm serve           # scan, watch for changes, serve the dashboard
-ccm models          # per-model table on the terminal
-ccm machines        # local and imported data, side by side
-ccm export          # write a portable bundle (--label, --origins, --out)
-ccm import FILE     # load another machine's bundle (--label)
-ccm reset           # delete derived state (safe; rescanning rebuilds it)
+acm scan            # scan every client, print a summary, exit
+acm serve           # scan, watch for changes, serve the dashboard
+acm models          # per-model table on the terminal
+acm machines        # local and imported data, side by side
+acm export          # write a portable bundle (--label, --origins, --out)
+acm import FILE     # load another machine's bundle (--label)
+acm reset           # delete derived state (safe; rescanning rebuilds it)
 ```
 
 Overrides: `--sessions`, `--db`, `--pricing`, or the environment variables
-`CCM_SESSIONS_DIR`, `CCM_CLAUDE_DIR`, `CCM_PI_DIR`, `CCM_OPENCODE_DB`,
-`CCM_GROK_DIR`, `CCM_KIMI_CODE_DIR`, `CCM_KIMI_DIR`, `CCM_HERMES_DB`,
-`CCM_COPILOT_DB`, `CCM_GEMINI_DIR`,
-`CCM_CURSOR_AGENT_DIR`, `CCM_CURSOR_AGENT_CAPTURE_INTERVAL`,
-`CCM_SOURCES`, `CCM_DB`, `CCM_PRICING`, `CCM_REFERENCE`, `CCM_HOST`, `CCM_PORT`,
-`CCM_POLL`, `CCM_CHECKOUT`, `CCM_UPDATE_FROM_LAN`.
-`CCM_SOURCES=codex,claude` restricts the scan to named clients.
-For the service, they go in `~/.config/ccm/env` — see
-[`packaging/ccm.env.example`](packaging/ccm.env.example).
+`ACM_SESSIONS_DIR`, `ACM_CLAUDE_DIR`, `ACM_PI_DIR`, `ACM_OPENCODE_DB`,
+`ACM_GROK_DIR`, `ACM_KIMI_CODE_DIR`, `ACM_KIMI_DIR`, `ACM_HERMES_DB`,
+`ACM_COPILOT_DB`, `ACM_GEMINI_DIR`,
+`ACM_CURSOR_AGENT_DIR`, `ACM_CURSOR_AGENT_CAPTURE_INTERVAL`,
+`ACM_SOURCES`, `ACM_DB`, `ACM_PRICING`, `ACM_REFERENCE`, `ACM_HOST`, `ACM_PORT`,
+`ACM_POLL`, `ACM_CHECKOUT`, `ACM_UPDATE_FROM_LAN`.
+`ACM_SOURCES=codex,claude` restricts the scan to named clients.
+For the service, they go in `~/.config/acm/env` — see
+[`packaging/acm.env.example`](packaging/acm.env.example).
 
 ## `just` recipes
 
@@ -90,24 +108,24 @@ ones worth knowing by name:
 
 ```
 just setup                     # uv sync --extra dev; pnpm install
-just serve [args]              # uv run ccm serve
-just scan [args]                # uv run ccm scan
-just ccm <subcommand> [args]   # any ccm subcommand, e.g. just ccm export -o out.json
+just serve [args]              # uv run acm serve
+just scan [args]                # uv run acm scan
+just acm <subcommand> [args]   # any acm subcommand, e.g. just acm export -o out.json
 just dev                       # API + Vite dev server together, hot reload, Ctrl-C stops both
 just test [args]               # the fixture suite (~5s)
 just test-corpus [args]        # the suite that reads the real corpora on this machine (~45s)
 just typecheck                 # tsc -b --force on the dashboard
 just check                     # test + typecheck + a wheel that must actually serve; what CI runs
-just clean                     # remove dist/, ccm/_web, web/dist, caches
+just clean                     # remove dist/, acm/_web, web/dist, caches
 ```
 
 **Building and installing**
 
 ```
-just build-web                 # pnpm build, then stage web/dist into ccm/_web
+just build-web                 # pnpm build, then stage web/dist into acm/_web
 just build                     # build-web, then uv build -> dist/*.whl, dist/*.tar.gz
 just verify-wheel              # build, then install the wheel into a throwaway venv+HOME and prove it scans and serves
-just install                   # build, then uv tool install the wheel -> `ccm` on PATH
+just install                   # build, then uv tool install the wheel -> `acm` on PATH
 just uninstall                 # uv tool uninstall (state and pricing are left alone)
 ```
 
@@ -118,8 +136,8 @@ just enable                    # install + install-service + start now + start a
 just disable                   # stop it and leave it stopped across boots
 just linger                    # keep it running when nobody is logged in (once per machine)
 just start / stop / restart
-just status                    # systemctl --user status ccm.service
-just logs [args]               # journalctl --user -u ccm.service -f, e.g. just logs -n 200
+just status                    # systemctl --user status acm.service
+just logs [args]               # journalctl --user -u acm.service -f, e.g. just logs -n 200
 just uninstall-service         # remove the unit file (leaves the installed tool alone)
 ```
 
@@ -144,7 +162,7 @@ just enable
 
 builds the wheel with the dashboard and rate table baked in, installs it with
 `uv tool install`, installs
-[`packaging/ccm.service`](packaging/ccm.service) as a systemd **user** unit
+[`packaging/acm.service`](packaging/acm.service) as a systemd **user** unit
 (user-scoped because every corpus it reads lives under `$HOME` and needs no
 privilege beyond the login user's), and starts it now and at every future
 login. To have it come up even when nobody is logged in:
@@ -154,27 +172,27 @@ just linger
 ```
 
 Override defaults (host, port, which clients to scan, custom corpus paths) by
-copying [`packaging/ccm.env.example`](packaging/ccm.env.example) to
-`~/.config/ccm/env` and uncommenting what you need — systemd does not expand
+copying [`packaging/acm.env.example`](packaging/acm.env.example) to
+`~/.config/acm/env` and uncommenting what you need — systemd does not expand
 `~` or `$HOME` in that file, so paths have to be written out in full.
 
 ```
 just logs                      # follow it
-just restart                   # after changing ~/.config/ccm/env
+just restart                   # after changing ~/.config/acm/env
 just update                     # pull, rebuild, reinstall, and restart it in one step
 ```
 
 ## Where it keeps things
 
-Run from a checkout, everything writable stays in the checkout: `data/ccm.sqlite`
+Run from a checkout, everything writable stays in the checkout: `data/acm.sqlite`
 and the `pricing.toml` beside it. Installed, there is no checkout to write to,
 so it uses the XDG directories instead.
 
 | | checkout | installed |
 |---|---|---|
-| database, safe to delete | `data/ccm.sqlite` | `~/.local/state/ccm/ccm.sqlite` |
-| rate table, editable | `pricing.toml` | `~/.config/ccm/pricing.toml` |
-| models.dev cache | `data/models-dev.json` | `~/.cache/ccm/models-dev.json` |
+| database, safe to delete | `data/acm.sqlite` | `~/.local/state/acm/acm.sqlite` |
+| rate table, editable | `pricing.toml` | `~/.config/acm/pricing.toml` |
+| models.dev cache | `data/models-dev.json` | `~/.cache/acm/models-dev.json` |
 
 Which one applies is decided by whether a `pyproject.toml` sits above the
 package, so an editable install still behaves like a checkout. The installed
@@ -184,7 +202,7 @@ released wheel needs no Node and no build step.
 
 The systemd unit asks systemd for those three directories by name
 (`StateDirectory=`, `ConfigurationDirectory=`, `CacheDirectory=`), which is what
-keeps them writable under `ProtectSystem=strict`. Pointing `CCM_DB` somewhere
+keeps them writable under `ProtectSystem=strict`. Pointing `ACM_DB` somewhere
 else means adding a matching `ReadWritePaths=` in a drop-in.
 
 ## Several machines, one view
@@ -193,9 +211,9 @@ Stats are portable. Export from one PC, import on another, and both appear in
 every chart, KPI and table with a `MACHINE` selector beside the `CLIENT` one.
 
 ```
-ccm export --label max-desktop -o max-desktop.json     # on the first machine
-ccm import max-desktop.json                            # on the second
-ccm export --label team -o team.json                   # re-export the pool
+acm export --label max-desktop -o max-desktop.json     # on the first machine
+acm import max-desktop.json                            # on the second
+acm export --label team -o team.json                   # re-export the pool
 ```
 
 A bundle carries the hourly rollup plus per-session stats — 1,117 bucket rows
@@ -215,7 +233,7 @@ query uses, so an imported session re-costs *exactly* when prices change rather
 than being frozen at whatever the exporter charged. They carry no per-request
 timeline, which the UI states rather than faking.
 
-Imported data lives in the same rollup under an `origin`, so `ccm serve`
+Imported data lives in the same rollup under an `origin`, so `acm serve`
 treats another machine as one more dimension. Two consequences worth knowing:
 the rollup rebuild is scoped to the local origin so it cannot delete imported
 rows, and a full rescan keeps imports — this machine cannot re-read someone
@@ -384,37 +402,37 @@ actual quota burn.
 ## Architecture
 
 ```
-ccm/config.py            paths, enabled clients, settings
-ccm/pricing.py           rate table, tier resolution, cost arithmetic
-ccm/store.py             SQLite schema, idempotent upserts, dirty-hour triggers
-ccm/sources/base.py      the Source contract and the shared JSONL tailing
-ccm/sources/codex.py     rollout JSONL, replay collapse
-ccm/sources/claude.py    transcript JSONL, streaming rewrites, cache-write TTLs
-ccm/sources/pi.py        session JSONL, client-reported costs
-ccm/sources/opencode.py  SQLite, mutable rows
-ccm/sources/grok.py      session update JSONL, turn-level usage, gateway names
-ccm/sources/kimi_code.py wire JSONL, one file per agent
-ccm/sources/kimi_cli.py  wire JSONL
-ccm/sources/hermes.py    SQLite, per-session-and-model rows
-ccm/sources/copilot.py   SQLite, per-request rows
-ccm/sources/gemini.py    session JSONL
-ccm/sources/cursor_agent.py  debug-log analytics events, mirrored out of /tmp
-ccm/scanner.py           the driver: plan, ingest, report progress
-ccm/aggregate.py         rollup maintenance and every query the UI makes
-ccm/cache_decay.py       cache-TTL inference from inter-request gaps
-ccm/portable.py          export/import bundles, machine labels
-ccm/modelsdev.py         cached reference prices, for cross-checking the table
-ccm/engine.py            background scan loop and SSE fan-out
-ccm/watcher.py           inotify with a polling fallback
-ccm/server.py            REST + server-sent events
-ccm/selfupdate.py        pull, rebuild, reinstall, restart from the dashboard
+acm/config.py            paths, enabled clients, settings
+acm/pricing.py           rate table, tier resolution, cost arithmetic
+acm/store.py             SQLite schema, idempotent upserts, dirty-hour triggers
+acm/sources/base.py      the Source contract and the shared JSONL tailing
+acm/sources/codex.py     rollout JSONL, replay collapse
+acm/sources/claude.py    transcript JSONL, streaming rewrites, cache-write TTLs
+acm/sources/pi.py        session JSONL, client-reported costs
+acm/sources/opencode.py  SQLite, mutable rows
+acm/sources/grok.py      session update JSONL, turn-level usage, gateway names
+acm/sources/kimi_code.py wire JSONL, one file per agent
+acm/sources/kimi_cli.py  wire JSONL
+acm/sources/hermes.py    SQLite, per-session-and-model rows
+acm/sources/copilot.py   SQLite, per-request rows
+acm/sources/gemini.py    session JSONL
+acm/sources/cursor_agent.py  debug-log analytics events, mirrored out of /tmp
+acm/scanner.py           the driver: plan, ingest, report progress
+acm/aggregate.py         rollup maintenance and every query the UI makes
+acm/cache_decay.py       cache-TTL inference from inter-request gaps
+acm/portable.py          export/import bundles, machine labels
+acm/modelsdev.py         cached reference prices, for cross-checking the table
+acm/engine.py            background scan loop and SSE fan-out
+acm/watcher.py           inotify with a polling fallback
+acm/server.py            REST + server-sent events
+acm/selfupdate.py        pull, rebuild, reinstall, restart from the dashboard
 web/                     Vite + React + TypeScript + uPlot
 justfile                 setup, build, install, service, release
 packaging/               systemd unit, wheel smoke test, release notes
 .github/workflows/       tests on three Pythons; tagged builds become releases
 ```
 
-Adding a client means writing one file under `ccm/sources/` — `plan()` lists the
+Adding a client means writing one file under `acm/sources/` — `plan()` lists the
 units with work outstanding, `ingest()` consumes one — and registering it. The
 scanner treats them identically and reports progress per client.
 
@@ -497,11 +515,11 @@ what confirms it, and the tab then offers a reload rather than taking one. A
 plain restart on unchanged code is deliberately not an update.
 
 **Update** in the header does what `just update` does — pull, rebuild, reinstall,
-restart — after a confirmation that says so. It needs `CCM_CHECKOUT` pointing at
+restart — after a confirmation that says so. It needs `ACM_CHECKOUT` pointing at
 the git checkout to build from, because an installed wheel has no idea where it
 came from and guessing is not good enough for something that pulls code and
 installs it. The script runs as its own transient systemd unit, since restarting
-`ccm.service` kills everything in that service's cgroup, and it writes a
+`acm.service` kills everything in that service's cgroup, and it writes a
 transcript the panel tails: an update fails for reasons only `git` or `uv` can
 explain, so the failure is shown verbatim rather than summarised. The connection
 dying part-way through is the expected path, not an error — the reload prompt
@@ -512,7 +530,7 @@ Four guards sit in front of it, and the first one is the least interesting.
 *It is refused from anywhere but the machine running the monitor.* The dashboard
 binds every interface and has no authentication, so an endpoint that runs a shell
 script is remote code execution for anyone who can reach the port;
-`CCM_UPDATE_FROM_LAN=1` opts out and is nobody's default.
+`ACM_UPDATE_FROM_LAN=1` opts out and is nobody's default.
 
 *It is refused when a browser says the request came from another page.* This is
 the attack that matters, and the loopback check above does nothing about it,

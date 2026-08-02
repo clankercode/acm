@@ -191,10 +191,10 @@ export function useOutputView(): [boolean, (on: boolean) => void] {
   const [on, setOn] = useState<boolean>(() => {
     const forced = new URLSearchParams(window.location.search).get('output')
     if (forced != null) return forced !== '0'
-    return localStorage.getItem('ccm-output') === '1'
+    return localStorage.getItem('acm-output') === '1'
   })
   useEffect(() => {
-    localStorage.setItem('ccm-output', on ? '1' : '0')
+    localStorage.setItem('acm-output', on ? '1' : '0')
   }, [on])
   return [on, setOn]
 }
@@ -207,7 +207,7 @@ export function useTheme(): [ThemeChoice, (t: ThemeChoice) => void, number] {
     // a screenshot can request one.
     const forced = new URLSearchParams(window.location.search).get('theme')
     if (forced === 'light' || forced === 'dark' || forced === 'system') return forced
-    return (localStorage.getItem('ccm-theme') as ThemeChoice) || 'system'
+    return (localStorage.getItem('acm-theme') as ThemeChoice) || 'system'
   })
   // Bumped whenever the resolved theme changes, so charts re-read CSS variables.
   const [epoch, setEpoch] = useState(0)
@@ -216,7 +216,7 @@ export function useTheme(): [ThemeChoice, (t: ThemeChoice) => void, number] {
     const root = document.documentElement
     if (choice === 'system') root.removeAttribute('data-theme')
     else root.setAttribute('data-theme', choice)
-    localStorage.setItem('ccm-theme', choice)
+    localStorage.setItem('acm-theme', choice)
     setEpoch((n) => n + 1)
   }, [choice])
 

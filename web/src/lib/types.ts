@@ -251,7 +251,7 @@ export interface AppState {
   sources: SourceInfo[]
   server_time: number
   /** Optional because a cached bundle can outlive the server that served it: in
-   *  development a new build is often pointed at an older `ccm serve`. */
+   *  development a new build is often pointed at an older `acm serve`. */
   build?: BuildInfo
 }
 

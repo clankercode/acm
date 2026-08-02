@@ -12,12 +12,12 @@ import os
 import threading
 import time
 
-from ccm import server
-from ccm.config import Settings
-from ccm.engine import Engine
-from ccm.scanner import Scanner
-from ccm.sources.base import Source, Unit, UnitResult
-from ccm.store import Store
+from acm import server
+from acm.config import Settings
+from acm.engine import Engine
+from acm.scanner import Scanner
+from acm.sources.base import Source, Unit, UnitResult
+from acm.store import Store
 
 
 class SlowSource(Source):
@@ -66,7 +66,7 @@ def wait_until(predicate, timeout=10.0, interval=0.02):
 
 def test_a_cancelled_pass_says_so_and_the_next_one_finishes_the_plan(tmp_path):
     """The scanner must report the difference between "done" and "gave up"."""
-    store = Store(tmp_path / "ccm.sqlite")
+    store = Store(tmp_path / "acm.sqlite")
     source = SlowSource(count=6, delay=0.0)
     scanner = Scanner(store, sources=[source])
 
@@ -99,7 +99,7 @@ def engine_with(tmp_path, source) -> Engine:
         cursor_agent_dir=tmp_path / "cursor-agent",
         cursor_agent_capture_interval=3600.0,
         sources=(),
-        db_path=tmp_path / "ccm.sqlite",
+        db_path=tmp_path / "acm.sqlite",
         pricing_path=tmp_path / "pricing.toml",
         reference_path=tmp_path / "models-dev.json",
         debounce_seconds=0.05,

@@ -8,14 +8,14 @@ guard is a suggestion.
 1. Only from loopback. The dashboard binds every interface by default so it can
    be read from another machine on the LAN, and an unauthenticated "run this
    script" endpoint on that interface is remote code execution for anyone who can
-   reach the port. Opting out is possible (``CCM_UPDATE_FROM_LAN=1``) and is
+   reach the port. Opting out is possible (``ACM_UPDATE_FROM_LAN=1``) and is
    nobody's default.
 2. Only a checkout that looks like this project. The script is run *in* that
    directory and pulls into it, so the path is not a place to be relaxed.
 
 The update outlives the server that starts it, since restarting the service is
 its last step. It therefore runs as its own transient systemd unit where that is
-available -- restarting ``ccm.service`` kills everything in that service's
+available -- restarting ``acm.service`` kills everything in that service's
 cgroup, a detached child included.
 """
 
@@ -33,7 +33,7 @@ from pathlib import Path
 
 from .config import Settings
 
-log = logging.getLogger("ccm.selfupdate")
+log = logging.getLogger("acm.selfupdate")
 
 #: The script does the work; this module only decides whether it may run.
 SCRIPT_NAME = "self-update.sh"
@@ -138,8 +138,8 @@ class Updater:
         path = self.settings.checkout_path
         if path is None:
             return (
-                "No checkout configured. Set CCM_CHECKOUT to the git checkout "
-                "to build from, e.g. in ~/.config/ccm/env"
+                "No checkout configured. Set ACM_CHECKOUT to the git checkout "
+                "to build from, e.g. in ~/.config/acm/env"
             )
         if not path.is_dir():
             return f"{path} is not a directory"
@@ -148,7 +148,7 @@ class Updater:
         # Named, so pointing this at some other repo does not pull that repo and
         # install it as this program.
         if not (path / "justfile").is_file() or not (path / "pyproject.toml").is_file():
-            return f"{path} does not look like a ccm checkout"
+            return f"{path} does not look like an acm checkout"
         if _script_for(path) is None:
             return f"{path} has no packaging/{SCRIPT_NAME}"
         return None
@@ -228,7 +228,7 @@ class Updater:
             return None
         return (
             "Updates are only allowed from the machine running the monitor. "
-            "Set CCM_UPDATE_FROM_LAN=1 to allow them over the network"
+            "Set ACM_UPDATE_FROM_LAN=1 to allow them over the network"
         )
 
     @staticmethod
@@ -348,14 +348,14 @@ class Updater:
             "restart" if runner else "norestart",
         ]
         if runner:
-            # Its own transient unit, or restarting ccm.service part-way through
+            # Its own transient unit, or restarting acm.service part-way through
             # would kill the update along with the server.
             argv = [
                 runner,
                 "--user",
                 "--collect",
                 "--quiet",
-                f"--unit=ccm-self-update-{int(time.time())}",
+                f"--unit=acm-self-update-{int(time.time())}",
                 *argv,
             ]
         try:

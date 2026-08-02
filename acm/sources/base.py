@@ -93,7 +93,7 @@ def project_label(cwd: str | None, git_repo: str | None = None) -> str:
 # canonical rows
 
 
-#: Bind order matches ``ccm.store.REQUEST_COLUMNS``; the tests assert that.
+#: Bind order matches ``acm.store.REQUEST_COLUMNS``; the tests assert that.
 def request_row(
     source: str,
     dk: str,
@@ -281,7 +281,7 @@ def cancellation(should_stop: Callable[[], bool] | None) -> Iterator[None]:
     pass can spend minutes inside a single large rollout, which is longer than
     shutdown will wait for this thread. One module-level hook covers every
     reader because the scan is single-threaded by design -- see
-    :mod:`ccm.engine`, where one worker owns all writes.
+    :mod:`acm.engine`, where one worker owns all writes.
     """
     global _should_stop
     previous = _should_stop

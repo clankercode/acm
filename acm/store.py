@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     -- Normalised project label, shared across clients. git_repo above is the
     -- remote URL as the client recorded it, which is useless as a join key --
     -- the same working tree appears here under two different remotes, and only
-    -- Codex records one at all. See ccm.sources.base.project_label.
+    -- Codex records one at all. See acm.sources.base.project_label.
     repo             TEXT,
     originator       TEXT,
     cli_version      TEXT,

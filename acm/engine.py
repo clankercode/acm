@@ -34,7 +34,7 @@ from .pricing import PricingTable
 from .scanner import ScanProgress, Scanner
 from .store import DERIVED_TABLES, Store
 
-log = logging.getLogger("ccm.engine")
+log = logging.getLogger("acm.engine")
 
 
 @dataclass(eq=False)  # identity-hashed so it can live in a set
@@ -97,7 +97,7 @@ class Engine:
         to notice, would make Ctrl-C do nothing until that walk finished.
         """
         self._watch_requested = watch
-        self._worker = threading.Thread(target=self._run, name="ccm-scan", daemon=True)
+        self._worker = threading.Thread(target=self._run, name="acm-scan", daemon=True)
         self._worker.start()
 
     def stop(self) -> None:

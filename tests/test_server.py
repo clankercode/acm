@@ -23,8 +23,8 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from ccm.config import Settings
-from ccm.server import create_app
+from acm.config import Settings
+from acm.server import create_app
 
 from .conftest import Thread
 
@@ -54,7 +54,7 @@ def settings(tmp_path, pricing) -> Settings:
         cursor_agent_dir=tmp_path / "cursor-agent",
         cursor_agent_capture_interval=3600.0,
         sources=("codex", "claude", "pi", "opencode", "grok"),
-        db_path=tmp_path / "ccm.sqlite",
+        db_path=tmp_path / "acm.sqlite",
         pricing_path=pricing.path,
         reference_path=tmp_path / "models-dev.json",
         debounce_seconds=0.05,

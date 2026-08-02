@@ -13,7 +13,7 @@ checkout="${1:?usage: self-update.sh <checkout> <logfile>}"
 log="${2:?usage: self-update.sh <checkout> <logfile>}"
 # "restart" only when the caller launched us somewhere that survives it.
 restart="${3:-norestart}"
-unit="ccm.service"
+unit="acm.service"
 
 mkdir -p "$(dirname "$log")"
 # Truncated, not appended: the log is a transcript of *this* attempt, and the

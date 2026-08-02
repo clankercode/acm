@@ -8,10 +8,10 @@ from datetime import timedelta
 
 import pytest
 
-from ccm import aggregate as A
-from ccm.pricing import PricingTable, compute_tier
-from ccm.scanner import Scanner
-from ccm.store import Store
+from acm import aggregate as A
+from acm.pricing import PricingTable, compute_tier
+from acm.scanner import Scanner
+from acm.store import Store
 
 from .conftest import Thread
 

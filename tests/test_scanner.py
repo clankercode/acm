@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from ccm.scanner import (
+from acm.scanner import (
     MAX_ERROR_KINDS,
     ROW_RATE_WINDOW,
     CodexSource,
@@ -18,7 +18,7 @@ from ccm.scanner import (
     iter_rollouts,
     parse_ts,
 )
-from ccm.store import Store
+from acm.store import Store
 
 from .conftest import Thread
 
@@ -556,7 +556,7 @@ def test_should_stop_ends_a_pass_between_files(store, sessions_dir, clock, tmp_p
 
 def test_cancellation_stops_a_reader_inside_a_file(store, sessions_dir, clock):
     """A single rollout can outlast the shutdown grace period on its own."""
-    from ccm.sources.base import cancellation, read_new_lines
+    from acm.sources.base import cancellation, read_new_lines
 
     thread = build(sessions_dir, clock)
     path = thread.write(sessions_dir)

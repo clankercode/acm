@@ -14,10 +14,10 @@ from datetime import timedelta
 
 import pytest
 
-from ccm import aggregate as A
-from ccm.pricing import PricingTable, compute_tier
-from ccm.scanner import Scanner
-from ccm.sources import (
+from acm import aggregate as A
+from acm.pricing import PricingTable, compute_tier
+from acm.scanner import Scanner
+from acm.sources import (
     ClaudeSource,
     CopilotSource,
     CursorAgentSource,
@@ -30,7 +30,7 @@ from ccm.sources import (
     PiSource,
     project_label,
 )
-from ccm.sources.base import parse_ts
+from acm.sources.base import parse_ts
 
 from .conftest import (
     ClaudeTranscript,
@@ -947,7 +947,7 @@ def test_progress_is_reported_per_client(tmp_path, store, clock):
 
 
 def test_absent_corpora_are_skipped_not_errors(tmp_path, store):
-    from ccm.config import Settings
+    from acm.config import Settings
 
     settings = Settings(
         sessions_dir=tmp_path / "nope",
@@ -1258,7 +1258,7 @@ def test_cursor_agent_captures_from_live_root(tmp_path, store):
 
 def test_cursor_agent_capture_is_idempotent(tmp_path):
     """Re-capturing a unchanged live log does not rewrite it."""
-    from ccm.sources.cursor_agent import capture_live_logs
+    from acm.sources.cursor_agent import capture_live_logs
 
     live = tmp_path / "cursor-agent-logs-1000"
     live.mkdir(parents=True)
@@ -1271,7 +1271,7 @@ def test_cursor_agent_capture_is_idempotent(tmp_path):
 
 def test_cursor_agent_resumes_model_from_carry_across_scans(tmp_path, store):
     """A completion whose create was consumed in a prior scan still resolves model."""
-    from ccm.sources.cursor_agent import CursorAgentSource
+    from acm.sources.cursor_agent import CursorAgentSource
 
     log_dir = tmp_path / "ca"
     log_dir.mkdir()

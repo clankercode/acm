@@ -14,9 +14,9 @@ from dataclasses import replace
 import pytest
 from fastapi.testclient import TestClient
 
-from ccm.config import Settings
-from ccm.selfupdate import Updater
-from ccm.server import create_app
+from acm.config import Settings
+from acm.selfupdate import Updater
+from acm.server import create_app
 
 
 def fake_checkout(tmp_path):
@@ -25,7 +25,7 @@ def fake_checkout(tmp_path):
     (root / ".git").mkdir(parents=True)
     (root / "packaging").mkdir()
     (root / "justfile").write_text("update:\n    true\n")
-    (root / "pyproject.toml").write_text('[project]\nname = "codex-cache-monitor"\n')
+    (root / "pyproject.toml").write_text('[project]\nname = "agent-cache-monitor"\n')
     (root / "packaging" / "self-update.sh").write_text("#!/usr/bin/env bash\ntrue\n")
     return root
 
@@ -46,7 +46,7 @@ def base(tmp_path, pricing) -> Settings:
         cursor_agent_dir=tmp_path / "cursor-agent",
         cursor_agent_capture_interval=3600.0,
         sources=(),
-        db_path=tmp_path / "state" / "ccm.sqlite",
+        db_path=tmp_path / "state" / "acm.sqlite",
         pricing_path=pricing.path,
         reference_path=tmp_path / "models-dev.json",
         debounce_seconds=0.05,
@@ -60,16 +60,16 @@ def base(tmp_path, pricing) -> Settings:
 def test_without_a_configured_checkout_there_is_nothing_to_update(base):
     status = Updater(base).status()
     assert status.available is False
-    assert "CCM_CHECKOUT" in (status.reason or "")
+    assert "ACM_CHECKOUT" in (status.reason or "")
 
 
-def test_a_directory_that_is_not_a_ccm_checkout_is_refused(base, tmp_path):
+def test_a_directory_that_is_not_an_acm_checkout_is_refused(base, tmp_path):
     other = tmp_path / "somewhere-else"
     (other / ".git").mkdir(parents=True)
     updater = Updater(replace(base, checkout_path=other))
     # The point of the check: pulling and installing *some other* repo as this
     # program is worse than not updating.
-    assert "does not look like a ccm checkout" in (updater.status().reason or "")
+    assert "does not look like an acm checkout" in (updater.status().reason or "")
 
     missing = Updater(replace(base, checkout_path=tmp_path / "nope"))
     assert "not a directory" in (missing.status().reason or "")
@@ -250,7 +250,7 @@ def test_a_refused_caller_is_told_nothing_about_the_checkout(base, tmp_path):
     settings = replace(base, checkout_path=fake_checkout(tmp_path))
     updater = Updater(settings)
     updater.log_path.parent.mkdir(parents=True, exist_ok=True)
-    updater.log_path.write_text("[12:00:00] updating /home/someone/src/ccm\n")
+    updater.log_path.write_text("[12:00:00] updating /home/someone/src/acm\n")
 
     app = create_app(settings, watch=False)
     with TestClient(app, client=("192.168.1.50", 9999)) as client:
@@ -299,7 +299,7 @@ def test_a_stale_marker_does_not_let_two_updates_through(base, tmp_path, monkeyp
 
     launched: list[list[str]] = []
     monkeypatch.setattr(
-        "ccm.selfupdate.subprocess.Popen", lambda argv, **kw: launched.append(argv)
+        "acm.selfupdate.subprocess.Popen", lambda argv, **kw: launched.append(argv)
     )
 
     before = updater.marker_path.stat().st_ino
@@ -325,7 +325,7 @@ def test_a_header_that_is_not_an_authority_is_not_this_machine(base, tmp_path):
     cannot contain a slash -- but a parse that is wrong by construction becomes a
     hole the moment it is reused.
     """
-    from ccm.selfupdate import _host_only, _names_this_machine
+    from acm.selfupdate import _host_only, _names_this_machine
 
     assert _host_only("http://localhost:5188") == "localhost"
     assert _host_only("127.0.0.1:8808") == "127.0.0.1"
@@ -366,7 +366,7 @@ def test_the_endpoint_reports_why_it_cannot_update(base):
     with TestClient(app, client=("127.0.0.1", 9999)) as client:
         body = client.get("/api/update").json()
         assert body["available"] is False
-        assert "CCM_CHECKOUT" in body["reason"]
+        assert "ACM_CHECKOUT" in body["reason"]
         # Addressed as localhost, so the rebinding guard has nothing to say and
         # the answer is the real one: nothing to update from.
         post = client.post("/api/update", headers={"host": "localhost:8808"})

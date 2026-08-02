@@ -246,7 +246,7 @@ def cmd_serve(args, settings) -> int:
             print("\n".join(out), flush=True)
             return
 
-    threading.Thread(target=announce, name="ccm-announce", daemon=True).start()
+    threading.Thread(target=announce, name="acm-announce", daemon=True).start()
     try:
         server.run()
     finally:
@@ -255,7 +255,7 @@ def cmd_serve(args, settings) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="ccm", description=__doc__)
+    parser = argparse.ArgumentParser(prog="acm", description=__doc__)
     parser.add_argument("--sessions", type=Path, help="override the sessions directory")
     parser.add_argument("--db", type=Path, help="override the database path")
     parser.add_argument("--pricing", type=Path, help="override the pricing table")

@@ -12,10 +12,10 @@ import json
 
 import pytest
 
-from ccm import aggregate as A
-from ccm.pricing import PricingTable
-from ccm.scanner import Scanner
-from ccm.store import Store
+from acm import aggregate as A
+from acm.pricing import PricingTable
+from acm.scanner import Scanner
+from acm.store import Store
 
 from .conftest import Thread
 
@@ -58,7 +58,7 @@ def other_store(tmp_path, name="other.sqlite") -> Store:
 
 def test_import_reproduces_every_headline_figure(seeded, pricing, tmp_path):
     """The gate: a bundle must carry the whole dashboard, not an approximation."""
-    from ccm import portable
+    from acm import portable
 
     before = A.totals(seeded, pricing, A.Filters())
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
@@ -78,7 +78,7 @@ def test_import_reproduces_every_headline_figure(seeded, pricing, tmp_path):
 
 
 def test_imported_sessions_survive_with_their_stats(seeded, pricing, tmp_path):
-    from ccm import portable
+    from acm import portable
 
     before = {s["rollout_id"]: s for s in A.sessions(seeded, pricing, A.Filters())}
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
@@ -104,7 +104,7 @@ def test_imported_sessions_recost_when_prices_change(seeded, pricing, tmp_path):
     Only tokens travel. If the split were collapsed, a later price edit could
     not be applied correctly to the imported rows.
     """
-    from ccm import portable
+    from acm import portable
 
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
     fresh = other_store(tmp_path)
@@ -123,7 +123,7 @@ def test_imported_sessions_recost_when_prices_change(seeded, pricing, tmp_path):
 
 def test_exclusions_are_deliberate(seeded, pricing):
     """Paths and working directories must not leave the machine."""
-    from ccm import portable
+    from acm import portable
 
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
     text = json.dumps(bundle)
@@ -146,7 +146,7 @@ def test_a_rollup_rebuild_leaves_imported_rows_alone(seeded, pricing, tmp_path):
     imported rows for that hour -- and only for the hours that overlap, so the
     damage is partial and easy to miss.
     """
-    from ccm import portable
+    from acm import portable
 
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
     local_cost = A.totals(seeded, pricing, A.Filters())["cost"]
@@ -162,7 +162,7 @@ def test_a_rollup_rebuild_leaves_imported_rows_alone(seeded, pricing, tmp_path):
 
 
 def test_origin_filter_partitions_the_totals(seeded, pricing):
-    from ccm import portable
+    from acm import portable
 
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
     portable.import_bundle(seeded, bundle, "other-pc")
@@ -178,8 +178,8 @@ def test_origin_filter_partitions_the_totals(seeded, pricing):
 
 def test_rescan_keeps_imports_but_rebuilds_local(seeded, pricing, tmp_path, sessions_dir):
     """A rescan cannot re-read another machine's corpus, so it must not drop it."""
-    from ccm import portable
-    from ccm.store import DERIVED_TABLES
+    from acm import portable
+    from acm.store import DERIVED_TABLES
 
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
     portable.import_bundle(seeded, bundle, "other-pc")
@@ -197,7 +197,7 @@ def test_rescan_keeps_imports_but_rebuilds_local(seeded, pricing, tmp_path, sess
 
 
 def test_deleting_a_machine_removes_all_of_it(seeded, pricing):
-    from ccm import portable
+    from acm import portable
 
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
     portable.import_bundle(seeded, bundle, "other-pc")
@@ -215,7 +215,7 @@ def test_deleting_a_machine_removes_all_of_it(seeded, pricing):
 
 
 def test_renaming_a_machine_moves_its_rows(seeded, pricing):
-    from ccm import portable
+    from acm import portable
 
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
     portable.import_bundle(seeded, bundle, "laptop")
@@ -232,7 +232,7 @@ def test_renaming_a_machine_moves_its_rows(seeded, pricing):
 
 def test_an_explicit_label_replaces_rather_than_duplicating(seeded, pricing):
     """Re-importing a colleague's updated bundle under the same name."""
-    from ccm import portable
+    from acm import portable
 
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
     portable.import_bundle(seeded, bundle, "laptop")
@@ -247,7 +247,7 @@ def test_an_explicit_label_replaces_rather_than_duplicating(seeded, pricing):
 
 def test_an_unlabelled_import_is_made_unique(seeded, pricing):
     """Two different bundles that happen to share a label must both survive."""
-    from ccm import portable
+    from acm import portable
 
     bundle = portable.export_bundle(seeded, pricing, label="laptop")
     portable.import_bundle(seeded, bundle)
@@ -258,7 +258,7 @@ def test_an_unlabelled_import_is_made_unique(seeded, pricing):
 
 
 def test_preview_reports_a_collision_without_importing(seeded, pricing):
-    from ccm import portable
+    from acm import portable
 
     bundle = portable.export_bundle(seeded, pricing, label="laptop")
     first = portable.preview(seeded, bundle)
@@ -285,10 +285,20 @@ def test_preview_reports_a_collision_without_importing(seeded, pricing):
     ],
 )
 def test_unreadable_bundles_say_why(store, payload, message):
-    from ccm import portable
+    from acm import portable
 
     with pytest.raises(portable.BundleError, match=message):
         portable.read_bundle(payload)
+
+
+def test_a_legacy_ccm_export_bundle_can_still_be_read(seeded, pricing):
+    """The ccm-export format is accepted on import for backward compat."""
+    from acm import portable
+
+    bundle = portable.export_bundle(seeded, pricing, label="old-pc")
+    bundle["format"] = "ccm-export"  # simulate a bundle from the old tool
+    info = portable.preview(seeded, bundle)
+    assert info["label"] == "old-pc"
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +306,7 @@ def test_unreadable_bundles_say_why(store, payload, message):
 
 
 def test_a_combined_export_equals_the_sum_of_its_parts(seeded, pricing, tmp_path):
-    from ccm import portable
+    from acm import portable
 
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
     one = A.totals(seeded, pricing, A.Filters())
@@ -320,7 +330,7 @@ def test_pooling_never_counts_one_session_twice(seeded, pricing):
     that has been round-tripped -- adding it to itself would invent work nobody
     did, and would break the session table's key on the way back in.
     """
-    from ccm import portable
+    from acm import portable
 
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
     portable.import_bundle(seeded, bundle, "other-pc")
@@ -337,7 +347,7 @@ def test_a_combined_export_merges_matching_keys(seeded, pricing):
     Otherwise a pooled bundle would grow linearly with the number of machines
     even when they did identical work.
     """
-    from ccm import portable
+    from acm import portable
 
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
     rows_before = len(bundle["buckets"])
@@ -349,7 +359,7 @@ def test_a_combined_export_merges_matching_keys(seeded, pricing):
 
 
 def test_provenance_survives_a_second_hop(seeded, pricing, tmp_path):
-    from ccm import portable
+    from acm import portable
 
     seeded.set_meta("local_label", "desk")
     first = portable.export_bundle(seeded, pricing, label="desk")
@@ -364,7 +374,7 @@ def test_provenance_survives_a_second_hop(seeded, pricing, tmp_path):
 
 
 def test_exporting_a_selection_leaves_the_rest_out(seeded, pricing):
-    from ccm import portable
+    from acm import portable
 
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
     local = A.totals(seeded, pricing, A.Filters())["requests"]
@@ -380,7 +390,7 @@ def test_exporting_a_selection_leaves_the_rest_out(seeded, pricing):
 
 
 def test_machine_listing_puts_this_one_first(seeded, pricing):
-    from ccm import portable
+    from acm import portable
 
     bundle = portable.export_bundle(seeded, pricing, label="origin-pc")
     portable.import_bundle(seeded, bundle, "other-pc")

@@ -37,7 +37,7 @@ long_context_threshold = 200_000
 # OpenAI long-context surcharge starts above 272K input tokens (not 200K).
 # Vendor: "Prompts with >272K input tokens are priced at 2x input and 1.5x
 # output for the full request." Short columns are labeled (<272K context length).
-# ccm's comparison is `input_tokens > long_context_threshold`, which matches.
+# acm's comparison is `input_tokens > long_context_threshold`, which matches.
 
 [models."gpt-5.6-sol"]
 input = 5.00

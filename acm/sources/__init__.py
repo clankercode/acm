@@ -4,12 +4,12 @@ Every client records the same underlying thing -- one API request, its token
 counts, and which model served it -- but agrees on almost nothing else: the
 storage format, the dedup hazard, even whether "input tokens" includes the
 cached ones. A source is the thin layer that turns one client's history into
-the canonical rows in :mod:`ccm.store`, and it is where all of that
+the canonical rows in :mod:`acm.store`, and it is where all of that
 disagreement is confined.
 
-The driver in :mod:`ccm.scanner` treats every source identically:
-:meth:`~ccm.sources.base.Source.plan` lists the units of work with their
-pending byte counts, and :meth:`~ccm.sources.base.Source.ingest` consumes one.
+The driver in :mod:`acm.scanner` treats every source identically:
+:meth:`~acm.sources.base.Source.plan` lists the units of work with their
+pending byte counts, and :meth:`~acm.sources.base.Source.ingest` consumes one.
 """
 
 from __future__ import annotations

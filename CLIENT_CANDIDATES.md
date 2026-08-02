@@ -2,7 +2,7 @@
 
 Inventory of coding agents we could scan for token / cache / cost stats.
 
-**Currently implemented** (see `ccm/sources/` and README): Codex, Claude Code, Pi, OpenCode, Grok, Kimi Code, Kimi CLI, Hermes, Copilot CLI, Gemini CLI.
+**Currently implemented** (see `acm/sources/` and README): Codex, Claude Code, Pi, OpenCode, Grok, Kimi Code, Kimi CLI, Hermes, Copilot CLI, Gemini CLI.
 
 This file is about **what else exists on this machine (or should)**, split by whether we already have a local history corpus to reverse-engineer against.
 
@@ -21,9 +21,9 @@ These have install/state dirs on this host and look scannable (or almost). Rough
 | **Hermes** (Nous) | `~/.hermes/state.db` (`sessions`, `session_model_usage`, `messages`) | SQLite | **Yes — excellent.** Per-session and per-model: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `reasoning_tokens`, cost fields | ~11 MB DB, 18 sessions / 35 model-usage rows. Near drop-in source. Also has `~/.hermes/sessions/` request dumps. |
 | **GitHub Copilot CLI** | `~/.copilot/session-store.db` (`assistant_usage_events`), per-session `session-state/*/events.jsonl` | SQLite + JSONL | **Yes — excellent.** `assistant_usage_events`: model, input/output/cache read/write/reasoning tokens, duration, endpoint | ~1.7 GB total; 196 usage events in sample (~10 M input tokens). Events stream is conversational; usage table is the gold path. |
 | **Cursor IDE** (Electron) | `~/.cursor/chats/*/store.db` (blobs), `~/.cursor/ai-tracking/ai-code-tracking.db`, Electron `state.vscdb` | SQLite blobs, code-attribution SQLite, LevelDB | **Negative.** Chat `store.db` blobs are serialized conversation messages with no token metadata. `ai-code-tracking.db` is code-attribution hashes / AI-commit-%, not tokens. Electron `state.vscdb` (LevelDB blob) is opaque. | ~600 chat DBs. 2026-07-28 spike confirmed no structured token store. |
-| **cursor-agent** (CLI) | `/tmp/cursor-agent-logs-*/session-*.log` (debug logs), mirrored to `~/.cache/ccm/cursor-logs/` | Prefixed JSON (`analytics.track` events) | **Yes — via debug logs.** Transcripts have no usage, but debug logs contain `analytics.track` events: `cli.request.create` (model, mode) and `cli.request.completed` (`estimated_tokens`), joined on `invocationID`. | ✅ implemented (`ccm/sources/cursor_agent.py`). 226 completed requests, ~6M estimated tokens on this host. Single undifferentiated token count (no output/cache breakdown); `/tmp` logs rotate (7-day/50-file cap) so the source mirrors to a stable cache on each scan. |
+| **cursor-agent** (CLI) | `/tmp/cursor-agent-logs-*/session-*.log` (debug logs), mirrored to `~/.cache/acm/cursor-logs/` | Prefixed JSON (`analytics.track` events) | **Yes — via debug logs.** Transcripts have no usage, but debug logs contain `analytics.track` events: `cli.request.create` (model, mode) and `cli.request.completed` (`estimated_tokens`), joined on `invocationID`. | ✅ implemented (`acm/sources/cursor_agent.py`). 226 completed requests, ~6M estimated tokens on this host. Single undifferentiated token count (no output/cache breakdown); `/tmp` logs rotate (7-day/50-file cap) so the source mirrors to a stable cache on each scan. |
 | **Claude Desktop / Cowork** | `~/.config/Claude/` (13 GB), especially `local-agent-mode-sessions/`, `IndexedDB/`, logs (`cowork_*.log`) | Electron: IndexedDB/LevelDB + JSON session metadata | **Partial / opaque.** Local agent sessions store metadata (`cliSessionId`, model, cwd, title) and may **delegate to Claude Code** (shared transcript path). Cloud chats sit in IndexedDB | Cowork/local-agent mode is the interesting path: if it reuses Claude Code transcripts, existing `claude` source may already cover host-loop work; pure Desktop chat needs IndexedDB reverse-engineering. |
-| **Gemini CLI** | `~/.gemini/tmp/*/chats/session-*.jsonl` | JSONL | **Yes — per-request.** Each `type=gemini` line carries `tokens: {input, output, cached, thoughts, tool, total}` + `model` | ✅ implemented (`ccm/sources/gemini.py`). 3 session files on this host (~35 unique requests). |
+| **Gemini CLI** | `~/.gemini/tmp/*/chats/session-*.jsonl` | JSONL | **Yes — per-request.** Each `type=gemini` line carries `tokens: {input, output, cached, thoughts, tool, total}` + `model` | ✅ implemented (`acm/sources/gemini.py`). 3 session files on this host (~35 unique requests). |
 | **Goose** | `~/.local/share/goose/sessions/sessions.db` | SQLite | **Schema yes, data thin.** Columns: `total_tokens`, `input_tokens`, `output_tokens`, accumulated_*, provider/model config | Only 1 session / 0 messages in sample — easy source once someone uses it more. |
 | **Zed Agent** | `~/.local/share/zed/threads/threads.db` | SQLite blob threads | **Unclear.** 6 threads; usage likely embedded in `data` blob if at all | Low volume; needs schema peek inside `data`. |
 | **OpenHands** | `~/.openhands/` | Mostly skills/cache | **No real session corpus** | Install present; not a usage source yet. |
@@ -32,20 +32,20 @@ These have install/state dirs on this host and look scannable (or almost). Rough
 
 ### Highest-ROI next sources (local)
 
-1. **Kimi Code** — ✅ implemented (`ccm/sources/kimi_code.py`)
-2. **Hermes** — ✅ implemented (`ccm/sources/hermes.py`)
-3. **Copilot CLI** — ✅ implemented (`ccm/sources/copilot.py`)
-4. **Kimi CLI** — ✅ implemented (`ccm/sources/kimi_cli.py`)
+1. **Kimi Code** — ✅ implemented (`acm/sources/kimi_code.py`)
+2. **Hermes** — ✅ implemented (`acm/sources/hermes.py`)
+3. **Copilot CLI** — ✅ implemented (`acm/sources/copilot.py`)
+4. **Kimi CLI** — ✅ implemented (`acm/sources/kimi_cli.py`)
 5. **Cursor IDE** — 2026-07-28 spike confirmed `ai-code-tracking.db` has **no token columns** (code-attribution only); chat `store.db` blobs are serialized messages with no token metadata; Electron `state.vscdb` is opaque LevelDB. **Verdict: negative.**
-6. **cursor-agent CLI** — ✅ implemented (`ccm/sources/cursor_agent.py`). Transcripts have no usage, but **debug logs** at `/tmp/cursor-agent-logs-*/session-*.log` contain `analytics.track` events: `cli.request.create` (model, mode) and `cli.request.completed` (`estimated_tokens`), joined on `invocationID`. The source mirrors these volatile `/tmp` logs into `~/.cache/ccm/cursor-logs/` on each scan for durability. Single undifferentiated token count (no output/cache breakdown); model is often `"default"` (the configured alias) which has no rate.
+6. **cursor-agent CLI** — ✅ implemented (`acm/sources/cursor_agent.py`). Transcripts have no usage, but **debug logs** at `/tmp/cursor-agent-logs-*/session-*.log` contain `analytics.track` events: `cli.request.create` (model, mode) and `cli.request.completed` (`estimated_tokens`), joined on `invocationID`. The source mirrors these volatile `/tmp` logs into `~/.cache/acm/cursor-logs/` on each scan for durability. Single undifferentiated token count (no output/cache breakdown); model is often `"default"` (the configured alias) which has no rate.
 7. **Claude Desktop / Cowork** — 2026-07-28 spike checked `~/.config/Claude/`: LevelDB localStorage has no token fields; cowork logs (`cowork_vm_node.log`, `claude.ai-web.log`) carry no usage data; no SQLite databases present. Cowork sessions may already appear under Claude Code projects via `cliSessionId`, in which case the existing `claude` source covers them. **Verdict: negative — no independent per-request token store.**
-8. **Gemini CLI** — ✅ implemented (`ccm/sources/gemini.py`). Session JSONL under `~/.gemini/tmp/*/chats/` carries per-request `tokens` blocks with input/output/cached/thoughts splits and model attribution.
+8. **Gemini CLI** — ✅ implemented (`acm/sources/gemini.py`). Session JSONL under `~/.gemini/tmp/*/chats/` carries per-request `tokens` blocks with input/output/cached/thoughts splits and model attribution.
 
 ---
 
 ## 2. No local samples (candidates to support later)
 
-Popular agents that fit CCM’s model but have **no useful history on this machine** right now. Grouped by how likely they are to keep local, parseable usage.
+Popular agents that fit ACM's model but have **no useful history on this machine** right now. Grouped by how likely they are to keep local, parseable usage.
 
 ### Likely file/DB-backed local history
 
@@ -81,16 +81,16 @@ Popular agents that fit CCM’s model but have **no useful history on this machi
 | **OpenHands (full)** | Local install is thin here; when used heavily, likely docker volumes / session stores |
 | **SWE-agent / Mini-SWE-agent** | Research harnesses; run logs often ad hoc |
 | **LangChain/LangGraph studio, AutoGen, CrewAI** | Frameworks, not a single history layout |
-| **Custom OpenAI-compatible proxies** | Better handled via proxy logs if needed, not CCM sources |
+| **Custom OpenAI-compatible proxies** | Better handled via proxy logs if needed, not ACM sources |
 
 ---
 
 ## How to add a client (reminder)
 
-From README / `ccm/sources/`:
+From README / `acm/sources/`:
 
-1. Write `ccm/sources/<name>.py` implementing `Source.plan` / `Source.ingest`  
-2. Register in `ccm/sources/__init__.py` `_BUILDERS` and `ccm/config.py` `ALL_SOURCES` + `Settings` path  
+1. Write `acm/sources/<name>.py` implementing `Source.plan` / `Source.ingest`  
+2. Register in `acm/sources/__init__.py` `_BUILDERS` and `acm/config.py` `ALL_SOURCES` + `Settings` path  
 3. Prefer clients with **request-level** usage + model id; fold cache read/write into the same columns as Claude/Codex  
 4. Add corpus tests under `tests/test_corpus_clients.py` when a real history exists  
 
@@ -117,4 +117,4 @@ A client with no history on a machine is skipped automatically once registered (
 | Hermes `state.db` | 11 M |
 | Goose | 144 K |
 
-Supported clients with empty/tiny primary paths on this host may still work when pointed at alternate profile dirs (`CCM_*_DIR` env overrides).
+Supported clients with empty/tiny primary paths on this host may still work when pointed at alternate profile dirs (`ACM_*_DIR` env overrides).

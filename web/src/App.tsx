@@ -573,7 +573,7 @@ export default function App() {
                     format={(v) => (v == null ? '--' : `$${v.toFixed(v < 1 ? 3 : 2)}`)}
                     unit="$/Mtok in"
                     yMin={0}
-                    syncKey="ccm"
+                    syncKey="acm"
                   />
                 </div>
               </section>
@@ -592,7 +592,7 @@ export default function App() {
                     format={(v) => usd(v)}
                     unit="USD"
                     stacked
-                    syncKey="ccm"
+                    syncKey="acm"
                   />
                 </div>
               </section>
@@ -644,7 +644,7 @@ export default function App() {
               unit="$/Mtok in"
               markers={markers}
               refLines={listRateLines}
-              syncKey="ccm"
+              syncKey="acm"
               yMin={0}
             />
           </div>
@@ -672,7 +672,7 @@ export default function App() {
                 yMin={0}
                 yMax={100}
                 markers={markers}
-                syncKey="ccm"
+                syncKey="acm"
               />
             </div>
           </section>
@@ -691,7 +691,7 @@ export default function App() {
                 format={(v) => compact(v)}
                 unit="tokens"
                 stacked
-                syncKey="ccm"
+                syncKey="acm"
               />
             </div>
           </section>
@@ -710,7 +710,7 @@ export default function App() {
                 format={(v) => usd(v)}
                 unit="USD"
                 stacked
-                syncKey="ccm"
+                syncKey="acm"
               />
             </div>
           </section>
@@ -728,7 +728,7 @@ export default function App() {
                 bucketSeconds={bucketSeconds}
                 format={(v) => usd(v)}
                 unit="USD"
-                syncKey="ccm"
+                syncKey="acm"
               />
             </div>
           </section>
@@ -747,7 +747,7 @@ export default function App() {
                 format={(v) => (v == null ? '--' : compact(v, 0))}
                 unit="requests"
                 stacked
-                syncKey="ccm"
+                syncKey="acm"
               />
             </div>
           </section>
@@ -774,7 +774,7 @@ export default function App() {
                     label: 'long-context threshold',
                   },
                 ]}
-                syncKey="ccm"
+                syncKey="acm"
               />
             </div>
           </section>
@@ -795,7 +795,7 @@ export default function App() {
                 format={(v) => usd(v)}
                 unit="USD"
                 stacked
-                syncKey="ccm"
+                syncKey="acm"
               />
             </div>
           </section>
@@ -818,7 +818,7 @@ export default function App() {
                     format={(v) => compact(v)}
                     unit="tokens"
                     stacked
-                    syncKey="ccm"
+                    syncKey="acm"
                   />
                 </div>
               </section>
@@ -844,7 +844,7 @@ export default function App() {
                     format={(v) => usd(v)}
                     unit="USD"
                     stacked
-                    syncKey="ccm"
+                    syncKey="acm"
                   />
                 </div>
               </section>
@@ -865,7 +865,7 @@ export default function App() {
                 format={(v) => usd(v)}
                 unit="USD"
                 stacked
-                syncKey="ccm"
+                syncKey="acm"
               />
             </div>
           </section>
@@ -949,7 +949,7 @@ export default function App() {
                 format={(v) => usd(v)}
                 unit="USD"
                 stacked
-                syncKey="ccm"
+                syncKey="acm"
               />
             </div>
           </section>

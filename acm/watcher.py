@@ -16,7 +16,7 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
-log = logging.getLogger("ccm.watcher")
+log = logging.getLogger("acm.watcher")
 
 
 class SessionWatcher:
@@ -47,7 +47,7 @@ class SessionWatcher:
         # loop already rescans every source, so the rest would be pure noise.
         if self.poll_interval > 0:
             self._poller = threading.Thread(
-                target=self._poll_loop, name="ccm-poll", daemon=True
+                target=self._poll_loop, name="acm-poll", daemon=True
             )
             self._poller.start()
 

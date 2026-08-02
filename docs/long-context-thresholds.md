@@ -13,7 +13,7 @@ Many vendors publish two rate cards for the same model:
 
 Once a request's prompt crosses the threshold, the vendor typically bills **the
 entire request** at the long rates (not only the tokens above the line). That
-cutoff is what ccm stores as `long_context_threshold` in `pricing.toml`.
+cutoff is what acm stores as `long_context_threshold` in `pricing.toml`.
 
 It is **not** the model's maximum context window (e.g. 1M tokens). A model can
 have a 1M window and still charge one flat rate for the whole window, or it can
@@ -23,7 +23,7 @@ In the UI, "Long above" is the human label for this threshold. When short and
 long rates are identical (or when the model has no long tier), the number may
 still appear because of the table default, but it does not change cost.
 
-## ccm comparison convention
+## acm comparison convention
 
 ```text
 long_context  ⇔  input_tokens > long_context_threshold
@@ -35,10 +35,10 @@ tier.
 
 Vendor wording varies:
 
-| Vendor | Typical wording | ccm threshold | Boundary note |
+| Vendor | Typical wording | acm threshold | Boundary note |
 |--------|-----------------|---------------|---------------|
 | OpenAI | `>272K` / short labeled `(<272K context length)` | `272_000` | Matches strict `>` |
-| xAI | `(< 200k)` vs `(≥ 200k)` | `200_000` | Vendor is inclusive at 200k; ccm bills short at exactly 200_000 (one-token edge) |
+| xAI | `(< 200k)` vs `(≥ 200k)` | `200_000` | Vendor is inclusive at 200k; acm bills short at exactly 200_000 (one-token edge) |
 | MiniMax-M3 | `≤ 512k` vs `> 512k` | `512_000` | Matches strict `>` |
 
 Default for any model that does not set its own threshold:
@@ -146,7 +146,7 @@ Tiered models (first-party `tiers` with `tier.type = "context"`):
 | grok-build → grok-build-0.1 | xai | 200000 |
 | MiniMax-M3 | minimax | 512000 |
 
-All other ccm models either matched with **no** `tiers` array (no long-context
+All other acm models either matched with **no** `tiers` array (no long-context
 surcharge in models.dev) or were missing as first-party ids
 (`grok-4.5-build`, `grok-composer-2.5-fast`).
 
@@ -169,7 +169,7 @@ The legacy `context_over_200k` field is historical; current tier size is 272000.
 - **Models with long tier:** gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5, gpt-5.4  
 - **Models without:** gpt-5.4-mini, gpt-5.2, codex variants — long context columns shown as `-` / single flat rate.
 - **Confidence:** high  
-- **ccm action:** set `long_context_threshold = 272_000` on the five long-tier models (was incorrectly 200_000).
+- **acm action:** set `long_context_threshold = 272_000` on the five long-tier models (was incorrectly 200_000).
 
 ### xAI (primary)
 
@@ -179,7 +179,7 @@ The legacy `context_over_200k` field is historical; current tier size is 272000.
   > requests whose prompt reaches the listed token threshold are billed at the higher rate for all tokens.
 - **Models:** grok-4.5, grok-4.20-0309-non-reasoning, grok-build (and grok-4.5-build via inherit).
 - **Confidence:** high for those four; **low** for grok-composer-2.5-fast (not listed with dual short/long tiers).
-- **ccm action:** keep `200_000`; leave composer without a long block (`long_tier_unknown = true`).
+- **acm action:** keep `200_000`; leave composer without a long block (`long_tier_unknown = true`).
 
 ### Anthropic (primary)
 
@@ -187,7 +187,7 @@ The legacy `context_over_200k` field is historical; current tier size is 272000.
 - **Evidence:**  
   > Long context pricing: Claude 4.6 and later models include the full 1M token context window at standard pricing. A 900k-token request is billed at the same per-token rate as a 9k-token request.
 - **Confidence:** high  
-- **ccm action:** no `[long]` tables; default threshold remains inert.
+- **acm action:** no `[long]` tables; default threshold remains inert.
 
 ### MiniMax (primary)
 
@@ -196,14 +196,14 @@ The legacy `context_over_200k` field is historical; current tier size is 272000.
 - **Evidence (M3):** priced as **`≤ 512k`** vs **`> 512k`** input tokens (higher long rates).  
 - **Evidence (M2.7 / highspeed):** single flat Input/Output/cache rates; no length split.
 - **Confidence:** high  
-- **ccm action:** keep MiniMax-M3 at `512_000`; leave M2.7 family without long tier.
+- **acm action:** keep MiniMax-M3 at `512_000`; leave M2.7 family without long tier.
 
 ### Z.ai / Zhipu GLM (primary)
 
 - **URL:** https://docs.z.ai/guides/overview/pricing  
 - **Evidence:** Text Models table lists single Input/Cached Input/Output prices per model with no long-context tier.
 - **Confidence:** high  
-- **ccm action:** none (inert default only).
+- **acm action:** none (inert default only).
 
 ### Moonshot / Kimi (primary)
 
@@ -211,7 +211,7 @@ The legacy `context_over_200k` field is historical; current tier size is 272000.
 - **Secondary:** https://platform.kimi.ai/docs/pricing/chat-k27-code  
 - **Evidence:** One cache-hit / cache-miss / output price per model across the full context window (e.g. kimi-k3 1,048,576 tokens); no long-context surcharge tier.
 - **Confidence:** high  
-- **ccm action:** none (inert default only).
+- **acm action:** none (inert default only).
 
 ### Xiaomi MiMo (primary)
 
@@ -220,14 +220,14 @@ The legacy `context_over_200k` field is historical; current tier size is 272000.
 - **Evidence:** Pay-as-you-go lists single cache-hit/miss/output rates.  
   > new pricing no longer differentiates based on the input length.
 - **Confidence:** high  
-- **ccm action:** none (inert default only).
+- **acm action:** none (inert default only).
 
 ### OpenCode free aliases
 
 - **URL:** https://models.dev/ / OpenCode Zen docs  
 - **Evidence:** free / no tiers for big-pickle and deepseek-v4-flash-free; no first-party long-context surcharge for free SKUs.
 - **Confidence:** medium  
-- **ccm action:** none ($0 either side of any threshold).
+- **acm action:** none ($0 either side of any threshold).
 
 ## Implementation notes
 
@@ -237,5 +237,5 @@ The legacy `context_over_200k` field is historical; current tier size is 272000.
    key and documenting inert default behavior over fake precision.
 3. When vendor docs and models.dev disagree, prefer the vendor pricing page;
    models.dev is corroboration and a convenient machine-readable check.
-4. xAI's inclusive `≥ 200k` vs ccm's exclusive `>` is a documented one-token
+4. xAI's inclusive `≥ 200k` vs acm's exclusive `>` is a documented one-token
    edge case; not adjusted unless product owners want a `>=` convention change.

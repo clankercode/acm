@@ -39,10 +39,10 @@ configured model alias) which carries no rate; real model names such as
 
 Durability -- ``/tmp`` rotates these logs (a newest-50 cap and ~7-day window),
 so reading ``/tmp`` directly would lose history on the next rescan. Instead the
-source keeps a stable mirror under ``~/.cache/ccm/cursor-logs/`` and reads that.
+source keeps a stable mirror under ``~/.cache/acm/cursor-logs/`` and reads that.
 The mirror is refreshed by :func:`capture_live_logs`, which runs at the top of
 :meth:`CursorAgentSource.plan` -- so no external daemon or hook is required.
-The capture is driven by CCM's poll fallback (every ``poll_seconds``, default
+The capture is driven by ACM's poll fallback (every ``poll_seconds``, default
 2s): the inotify watcher only fires on ``.jsonl``/``.db`` files, and
 cursor-agent logs are ``.log``, so the live dir is in :attr:`watch_roots` for
 completeness but does not itself trigger a scan. An optional cursor-agent

@@ -7,39 +7,39 @@
 ; and it needs no privilege the login user does not already have.
 ;
 ; Installed by hand instead:
-;   install -m 644 packaging/ccm.service ~/.config/systemd/user/
-;   systemctl --user daemon-reload && systemctl --user enable --now ccm.service
+;   install -m 644 packaging/acm.service ~/.config/systemd/user/
+;   systemctl --user daemon-reload && systemctl --user enable --now acm.service
 
 [Unit]
 Description=Agent Cache Monitor
-Documentation=https://github.com/xertrov/codex-cache-monitor
+Documentation=https://github.com/clankercode/acm
 After=network.target
 
 [Service]
 Type=exec
 ; `just install` puts the executable here. Point this at
-; `%h/src/codex-cache-monitor/.venv/bin/ccm` to run a checkout instead.
-ExecStart=%h/.local/bin/ccm serve
-SyslogIdentifier=ccm
+; `%h/src/acm/.venv/bin/acm` to run a checkout instead.
+ExecStart=%h/.local/bin/acm serve
+SyslogIdentifier=acm
 
-; Settings go here, one KEY=value per line: CCM_PORT, CCM_HOST, CCM_SOURCES,
-; CCM_DB, CCM_PRICING, ... The leading `-` makes the file optional.
-EnvironmentFile=-%E/ccm/env
+; Settings go here, one KEY=value per line: ACM_PORT, ACM_HOST, ACM_SOURCES,
+; ACM_DB, ACM_PRICING, ... The leading `-` makes the file optional.
+EnvironmentFile=-%E/acm/env
 Environment=PYTHONUNBUFFERED=1
 
 Restart=on-failure
 RestartSec=5s
 ; A scan of a large corpus can take a while before the port opens.
 TimeoutStartSec=300
-; ccm gives open dashboards 5s to let go on SIGTERM; this is the backstop.
+; acm gives open dashboards 5s to let go on SIGTERM; this is the backstop.
 TimeoutStopSec=20
 
 ; systemd creates these and keeps them writable under ProtectSystem=strict.
-; They are exactly the paths ccm defaults to when it is not run from a
-; checkout: ~/.local/state/ccm, ~/.cache/ccm and ~/.config/ccm.
-StateDirectory=ccm
-CacheDirectory=ccm
-ConfigurationDirectory=ccm
+; They are exactly the paths acm defaults to when it is not run from a
+; checkout: ~/.local/state/acm, ~/.cache/acm and ~/.config/acm.
+StateDirectory=acm
+CacheDirectory=acm
+ConfigurationDirectory=acm
 
 ; The session corpora stay readable -- ProtectHome would hide them, and every
 ; one of them is opened read-only anyway -- but nothing else is writable.

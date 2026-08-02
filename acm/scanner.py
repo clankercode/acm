@@ -1,6 +1,6 @@
 """The scan driver.
 
-Everything format-specific lives in :mod:`ccm.sources`. What is left here is the
+Everything format-specific lives in :mod:`acm.sources`. What is left here is the
 part that is the same for every client: work out what has outstanding work,
 consume it, and keep an honest running account of progress while doing so.
 
@@ -353,7 +353,7 @@ class Scanner:
         """One full pass: ingest whatever is new since the last pass.
 
         ``should_stop`` is polled between files, and inside them by the readers
-        (see :func:`ccm.sources.base.cancellation`). A cold scan of a large
+        (see :func:`acm.sources.base.cancellation`). A cold scan of a large
         corpus runs for minutes, and shutdown waits on this thread, so without
         a way to leave early Ctrl-C would appear to hang for as long as the
         join allows. Whatever has been ingested so far is already committed,

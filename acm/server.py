@@ -22,10 +22,10 @@ from .engine import Engine
 from .selfupdate import Updater
 
 
-#: The distribution name, which is not the import name -- ``version("ccm")``
+#: The distribution name, which is not the import name -- ``version("acm")``
 #: always answered "dev", so exports and the build banner never carried a real
 #: version.
-DIST_NAME = "codex-cache-monitor"
+DIST_NAME = "agent-cache-monitor"
 
 
 def version(name: str = DIST_NAME) -> str:
@@ -36,7 +36,7 @@ def version(name: str = DIST_NAME) -> str:
         return "dev"
 
 
-log = logging.getLogger("ccm.server")
+log = logging.getLogger("acm.server")
 
 
 def web_dist() -> Path | None:
@@ -365,7 +365,7 @@ def create_app(settings: Settings | None = None, *, watch: bool = True) -> FastA
             orjson.dumps(bundle),
             media_type="application/json",
             headers={
-                "Content-Disposition": f'attachment; filename="ccm-{name}.json"'
+                "Content-Disposition": f'attachment; filename="acm-{name}.json"'
             },
         )
 

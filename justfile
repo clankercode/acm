@@ -2,16 +2,16 @@
 #
 #   just setup      first time on a new machine
 #   just serve      run it from this checkout
-#   just install    put `ccm` on PATH with the dashboard baked in
+#   just install    put `acm` on PATH with the dashboard baked in
 #   just enable     run it in the background under systemd, from boot
 #   just update     pull, rebuild, reinstall, restart
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 set positional-arguments
 
-package  := "codex-cache-monitor"
+package  := "agent-cache-monitor"
 version  := `sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1`
-unit     := "ccm.service"
+unit     := "acm.service"
 unit_dir := env("XDG_CONFIG_HOME", home_directory() / ".config") / "systemd/user"
 
 # List the recipes.
@@ -35,9 +35,9 @@ upgrade:
 # Build the dashboard and stage a copy inside the package.
 build-web:
     cd web && pnpm build
-    rm -rf ccm/_web
-    cp -r web/dist ccm/_web
-    @echo "staged $(find ccm/_web -type f | wc -l) files in ccm/_web"
+    rm -rf acm/_web
+    cp -r web/dist acm/_web
+    @echo "staged $(find acm/_web -type f | wc -l) files in acm/_web"
 
 # Build the wheel and sdist into dist/, dashboard included.
 build: build-web
@@ -55,7 +55,7 @@ verify-wheel: build
     # `pipefail` reports the member missing -- a race that failed on whichever
     # member happened to lose it.
     listing=$(unzip -l "$wheel")
-    for member in ccm/_web/index.html ccm/pricing.default.toml ccm/server.py; do
+    for member in acm/_web/index.html acm/pricing.default.toml acm/server.py; do
         grep -q " $member\$" <<<"$listing" || { echo "wheel is missing $member"; exit 1; }
     done
     packaging/smoke-test.sh "$wheel"
@@ -66,23 +66,23 @@ notes:
 
 # --- run --------------------------------------------------------------------
 
-# Run any ccm subcommand from this checkout: `just ccm export -o out.json`.
-ccm *args:
-    uv run ccm "$@"
+# Run any acm subcommand from this checkout: `just acm export -o out.json`.
+acm *args:
+    uv run acm "$@"
 
 # Serve the dashboard from this checkout.
 serve *args:
-    uv run ccm serve "$@"
+    uv run acm serve "$@"
 
 # Scan every corpus and print a summary.
 scan *args:
-    uv run ccm scan "$@"
+    uv run acm scan "$@"
 
 # API plus the Vite dev server with hot reload; Ctrl-C stops both.
 dev:
     #!/usr/bin/env bash
     set -euo pipefail
-    uv run ccm serve --log-level info &
+    uv run acm serve --log-level info &
     api=$!
     trap 'kill $api 2>/dev/null || true' EXIT
     cd web && pnpm dev
@@ -106,10 +106,10 @@ check: test typecheck verify-wheel
 
 # --- install ----------------------------------------------------------------
 
-# Install `ccm` on PATH as a standalone tool, dashboard included.
+# Install `acm` on PATH as a standalone tool, dashboard included.
 install: build
     uv tool install --force --from "$(ls dist/*.whl)" {{package}}
-    @echo "installed $(command -v ccm || echo '~/.local/bin/ccm')"
+    @echo "installed $(command -v acm || echo '~/.local/bin/acm')"
 
 # Remove the standalone tool. State and pricing are left alone.
 uninstall:
@@ -173,11 +173,11 @@ update:
 
 # Delete the derived database. Rescanning rebuilds it.
 reset:
-    uv run ccm reset
+    uv run acm reset
 
 # Remove every build product.
 clean:
-    rm -rf dist ccm/_web web/dist web/tsconfig.tsbuildinfo .pytest_cache
+    rm -rf dist acm/_web web/dist web/tsconfig.tsbuildinfo .pytest_cache
     find . -path ./.venv -prune -o -name __pycache__ -type d -print0 | xargs -0 rm -rf
 
 # --- release ----------------------------------------------------------------

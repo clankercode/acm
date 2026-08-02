@@ -7,12 +7,12 @@ from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
-from ccm import aggregate as A
-from ccm.cache_decay import cache_decay
-from ccm.config import Settings
-from ccm.scanner import Scanner
-from ccm.server import create_app
-from ccm.store import Store
+from acm import aggregate as A
+from acm.cache_decay import cache_decay
+from acm.config import Settings
+from acm.scanner import Scanner
+from acm.server import create_app
+from acm.store import Store
 
 from .conftest import Thread
 
@@ -103,7 +103,7 @@ def test_cache_decay_endpoint(tmp_path, pricing):
         cursor_agent_dir=tmp_path / "cursor-agent",
         cursor_agent_capture_interval=3600.0,
         sources=("codex", "claude", "pi", "opencode", "grok"),
-        db_path=tmp_path / "ccm.sqlite",
+        db_path=tmp_path / "acm.sqlite",
         pricing_path=pricing.path,
         reference_path=tmp_path / "models-dev.json",
         debounce_seconds=0.05,

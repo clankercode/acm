@@ -63,8 +63,8 @@ jobs:
       - name: Build
         run: |
           cd web && pnpm install --frozen-lockfile && pnpm build && cd ..
-          rm -rf ccm/_web dist
-          cp -r web/dist ccm/_web
+          rm -rf acm/_web dist
+          cp -r web/dist acm/_web
           uv build
 
       - name: Smoke-test the wheel
@@ -84,7 +84,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ steps.meta.outputs.tag }}" \
-            --title "ccm ${{ steps.meta.outputs.version }}" \
+            --title "acm ${{ steps.meta.outputs.version }}" \
             --notes-file notes.md \
             --verify-tag \
             ${{ steps.meta.outputs.prerelease == 'true' && '--prerelease' || '--latest' }} \

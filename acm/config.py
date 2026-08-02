@@ -10,6 +10,7 @@ would be somewhere unwritable in ``site-packages``.
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 from dataclasses import dataclass
@@ -25,10 +26,57 @@ DEV_LAYOUT = (PROJECT_ROOT / "pyproject.toml").is_file()
 #: The rate table shipped inside the wheel, copied out on first run.
 BUNDLED_PRICING = PACKAGE_ROOT / "pricing.default.toml"
 
+_log = logging.getLogger("acm.config")
+
+#: Directory name used before the ccm -> acm rename, still read on migration
+#: and (for env vars) as a silent fallback.
+_LEGACY_DIR = "ccm"
+_CURRENT_DIR = "acm"
+_LEGACY_DB_NAME = "ccm.sqlite"
+_CURRENT_DB_NAME = "acm.sqlite"
+
+
+def migrate_legacy_ccm_paths() -> None:
+    """One-time rename of ccm-era state/config/cache dirs to acm.
+
+    Runs before anything reads or writes those locations. If the new ``acm``
+    directory already exists, the old one is left alone -- the user has run
+    both versions and we will not guess which state wins.
+    """
+    for var, fallback in (
+        ("XDG_STATE_HOME", ".local/state"),
+        ("XDG_CONFIG_HOME", ".config"),
+        ("XDG_CACHE_HOME", ".cache"),
+    ):
+        raw = os.environ.get(var)
+        base = Path(raw).expanduser() if raw else Path.home() / fallback
+        old = base / _LEGACY_DIR
+        new = base / _CURRENT_DIR
+        if not old.is_dir() or new.exists():
+            continue
+        try:
+            old.rename(new)
+            _log.info("migrated %s -> %s", old, new)
+        except OSError as exc:
+            _log.warning("could not migrate %s -> %s: %s", old, new, exc)
+
+    # Inside the state dir, the DB file and its SQLite sidecars were renamed too.
+    raw = os.environ.get("XDG_STATE_HOME")
+    state = Path(raw).expanduser() if raw else Path.home() / ".local/state"
+    for suffix in ("", "-wal", "-shm"):
+        old_db = state / _CURRENT_DIR / f"{_LEGACY_DB_NAME}{suffix}"
+        new_db = state / _CURRENT_DIR / f"{_CURRENT_DB_NAME}{suffix}"
+        if old_db.exists() and not new_db.exists():
+            try:
+                old_db.rename(new_db)
+                _log.info("migrated db %s -> %s", old_db, new_db)
+            except OSError as exc:
+                _log.warning("could not migrate db %s: %s", old_db, exc)
+
 
 def _xdg(var: str, fallback: str) -> Path:
     raw = os.environ.get(var)
-    return (Path(raw).expanduser() if raw else Path.home() / fallback) / "ccm"
+    return (Path(raw).expanduser() if raw else Path.home() / fallback) / "acm"
 
 
 #: Derived state, safe to delete.
@@ -39,25 +87,38 @@ CONFIG_DIR = PROJECT_ROOT if DEV_LAYOUT else _xdg("XDG_CONFIG_HOME", ".config")
 CACHE_DIR = PROJECT_ROOT / "data" if DEV_LAYOUT else _xdg("XDG_CACHE_HOME", ".cache")
 
 
+def _env(name: str) -> str | None:
+    """ACM_ first, CCM_ as a legacy fallback (one rename behind).
+
+    The old env-var names are accepted silently for one release so that a
+    migrated ``~/.config/acm/env`` or a shell profile still works.
+    """
+    val = os.environ.get(name)
+    if val is not None:
+        return val
+    legacy = "CCM_" + name[4:] if name.startswith("ACM_") else None
+    return os.environ.get(legacy) if legacy else None
+
+
 def _env_path(name: str, default: Path) -> Path:
-    raw = os.environ.get(name)
+    raw = _env(name)
     return Path(raw).expanduser() if raw else default
 
 
 def _env_optional_path(name: str, default: Path | None) -> Path | None:
     """Like :func:`_env_path`, but an empty value means "nowhere", not "default"."""
-    raw = os.environ.get(name)
+    raw = _env(name)
     if raw is None:
         return default
     return Path(raw).expanduser() if raw.strip() else None
 
 
 def _env_flag(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+    return (_env(name) or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _env_float(name: str, default: float) -> float:
-    raw = os.environ.get(name)
+    raw = _env(name)
     return float(raw) if raw else default
 
 
@@ -79,7 +140,7 @@ ALL_SOURCES = (
 
 
 def _env_sources(name: str) -> tuple[str, ...]:
-    raw = os.environ.get(name)
+    raw = _env(name)
     if not raw:
         return ALL_SOURCES
     wanted = [s.strip() for s in raw.split(",") if s.strip()]
@@ -159,50 +220,50 @@ class Settings:
     def from_env(cls) -> Settings:
         return cls(
             sessions_dir=_env_path(
-                "CCM_SESSIONS_DIR", Path.home() / ".codex-shared" / "sessions"
+                "ACM_SESSIONS_DIR", Path.home() / ".codex-shared" / "sessions"
             ),
-            claude_dir=_env_path("CCM_CLAUDE_DIR", Path.home() / ".claude" / "projects"),
-            pi_dir=_env_path("CCM_PI_DIR", Path.home() / ".pi" / "agent" / "sessions"),
+            claude_dir=_env_path("ACM_CLAUDE_DIR", Path.home() / ".claude" / "projects"),
+            pi_dir=_env_path("ACM_PI_DIR", Path.home() / ".pi" / "agent" / "sessions"),
             opencode_db=_env_path(
-                "CCM_OPENCODE_DB",
+                "ACM_OPENCODE_DB",
                 Path.home() / ".local" / "share" / "opencode" / "opencode.db",
             ),
-            grok_dir=_env_path("CCM_GROK_DIR", Path.home() / ".grok" / "sessions"),
+            grok_dir=_env_path("ACM_GROK_DIR", Path.home() / ".grok" / "sessions"),
             kimi_code_dir=_env_path(
-                "CCM_KIMI_CODE_DIR", Path.home() / ".kimi-code" / "sessions"
+                "ACM_KIMI_CODE_DIR", Path.home() / ".kimi-code" / "sessions"
             ),
-            kimi_dir=_env_path("CCM_KIMI_DIR", Path.home() / ".kimi" / "sessions"),
-            hermes_db=_env_path("CCM_HERMES_DB", Path.home() / ".hermes" / "state.db"),
+            kimi_dir=_env_path("ACM_KIMI_DIR", Path.home() / ".kimi" / "sessions"),
+            hermes_db=_env_path("ACM_HERMES_DB", Path.home() / ".hermes" / "state.db"),
             copilot_db=_env_path(
-                "CCM_COPILOT_DB", Path.home() / ".copilot" / "session-store.db"
+                "ACM_COPILOT_DB", Path.home() / ".copilot" / "session-store.db"
             ),
             gemini_dir=_env_path(
-                "CCM_GEMINI_DIR", Path.home() / ".gemini" / "tmp"
+                "ACM_GEMINI_DIR", Path.home() / ".gemini" / "tmp"
             ),
             cursor_agent_dir=_env_path(
-                "CCM_CURSOR_AGENT_DIR",
-                Path.home() / ".cache" / "ccm" / "cursor-logs",
+                "ACM_CURSOR_AGENT_DIR",
+                Path.home() / ".cache" / "acm" / "cursor-logs",
             ),
             cursor_agent_capture_interval=_env_float(
-                "CCM_CURSOR_AGENT_CAPTURE_INTERVAL", 3600.0
+                "ACM_CURSOR_AGENT_CAPTURE_INTERVAL", 3600.0
             ),
-            sources=_env_sources("CCM_SOURCES"),
-            db_path=_env_path("CCM_DB", STATE_DIR / "ccm.sqlite"),
-            pricing_path=_env_path("CCM_PRICING", CONFIG_DIR / "pricing.toml"),
-            reference_path=_env_path("CCM_REFERENCE", CACHE_DIR / "models-dev.json"),
-            debounce_seconds=_env_float("CCM_DEBOUNCE", 0.25),
-            poll_seconds=_env_float("CCM_POLL", 2.0),
-            broadcast_hz=_env_float("CCM_BROADCAST_HZ", 4.0),
+            sources=_env_sources("ACM_SOURCES"),
+            db_path=_env_path("ACM_DB", STATE_DIR / "acm.sqlite"),
+            pricing_path=_env_path("ACM_PRICING", CONFIG_DIR / "pricing.toml"),
+            reference_path=_env_path("ACM_REFERENCE", CACHE_DIR / "models-dev.json"),
+            debounce_seconds=_env_float("ACM_DEBOUNCE", 0.25),
+            poll_seconds=_env_float("ACM_POLL", 2.0),
+            broadcast_hz=_env_float("ACM_BROADCAST_HZ", 4.0),
             # Bound on all interfaces so the dashboard is reachable from other
             # machines on the LAN, not just loopback.
-            host=os.environ.get("CCM_HOST", "0.0.0.0"),
+            host=_env("ACM_HOST") or "0.0.0.0",
             # 8787 is taken by the pre-existing codex-session-monitor on this
             # host, so the default sits clear of it.
-            port=int(os.environ.get("CCM_PORT", "8808")),
+            port=int(_env("ACM_PORT") or "8808"),
             checkout_path=_env_optional_path(
-                "CCM_CHECKOUT", PROJECT_ROOT if DEV_LAYOUT else None
+                "ACM_CHECKOUT", PROJECT_ROOT if DEV_LAYOUT else None
             ),
-            update_from_lan=_env_flag("CCM_UPDATE_FROM_LAN"),
+            update_from_lan=_env_flag("ACM_UPDATE_FROM_LAN"),
         )
 
 
@@ -215,6 +276,7 @@ def bootstrap(cfg: Settings) -> None:
     Called from the CLI rather than at import so that constructing ``Settings``
     stays free of side effects, which the tests rely on.
     """
+    migrate_legacy_ccm_paths()
     if cfg.pricing_path.exists() or not BUNDLED_PRICING.is_file():
         return
     cfg.pricing_path.parent.mkdir(parents=True, exist_ok=True)

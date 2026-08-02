@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ccm.pricing import (
+from acm.pricing import (
     PricingTable,
     Tier,
     compute,

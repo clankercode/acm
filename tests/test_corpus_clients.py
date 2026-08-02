@@ -18,10 +18,10 @@ from pathlib import Path
 
 import pytest
 
-from ccm import aggregate as A
-from ccm.pricing import PricingTable, compute_tier
-from ccm.scanner import Scanner
-from ccm.sources import (
+from acm import aggregate as A
+from acm.pricing import PricingTable, compute_tier
+from acm.scanner import Scanner
+from acm.sources import (
     ClaudeSource,
     CopilotSource,
     CursorAgentSource,
@@ -33,7 +33,7 @@ from ccm.sources import (
     OpenCodeSource,
     PiSource,
 )
-from ccm.store import Store
+from acm.store import Store
 
 from .conftest import UNPRICED_BY_DESIGN, unpriced_names
 
@@ -47,7 +47,7 @@ HERMES = Path.home() / ".hermes" / "state.db"
 COPILOT = Path.home() / ".copilot" / "session-store.db"
 GEMINI = Path.home() / ".gemini" / "tmp"
 CURSOR_AGENT = Path("/tmp")
-CURSOR_AGENT_CACHE = Path.home() / ".cache" / "ccm" / "cursor-logs"
+CURSOR_AGENT_CACHE = Path.home() / ".cache" / "acm" / "cursor-logs"
 REPO_PRICING = Path(__file__).resolve().parent.parent / "pricing.toml"
 
 pytestmark = [
@@ -97,7 +97,7 @@ def available_sources():
 
 @pytest.fixture(scope="module")
 def scanned(tmp_path_factory):
-    db = tmp_path_factory.mktemp("clients") / "ccm.sqlite"
+    db = tmp_path_factory.mktemp("clients") / "acm.sqlite"
     store = Store(db)
     pricing = PricingTable(REPO_PRICING)
     progress = Scanner(store, sources=available_sources()).scan_once()
@@ -302,7 +302,7 @@ def test_opencode_reads_the_live_database_without_writing_to_it(scanned):
     conn = sqlite3.connect(f"file:{OPENCODE}?mode=ro", uri=True)
     try:
         with pytest.raises(sqlite3.OperationalError):
-            conn.execute("CREATE TABLE ccm_probe (x)")
+            conn.execute("CREATE TABLE acm_probe (x)")
     finally:
         conn.close()
 

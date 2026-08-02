@@ -20,10 +20,10 @@ from pathlib import Path
 
 import pytest
 
-from ccm import aggregate as A
-from ccm.pricing import PricingTable, compute_tier
-from ccm.scanner import Scanner
-from ccm.store import Store
+from acm import aggregate as A
+from acm.pricing import PricingTable, compute_tier
+from acm.scanner import Scanner
+from acm.store import Store
 
 from .conftest import UNPRICED_BY_DESIGN, unpriced_names
 
@@ -98,7 +98,7 @@ def reference_scan(offsets: dict[str, int]) -> dict:
 
 @pytest.fixture(scope="module")
 def scanned(tmp_path_factory):
-    db = tmp_path_factory.mktemp("corpus") / "ccm.sqlite"
+    db = tmp_path_factory.mktemp("corpus") / "acm.sqlite"
     store = Store(db)
     pricing = PricingTable(REPO_PRICING)
     progress = Scanner(store, CORPUS).scan_once()

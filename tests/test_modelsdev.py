@@ -12,8 +12,8 @@ import urllib.error
 
 import pytest
 
-from ccm.modelsdev import ModelsDev
-from ccm.pricing import PricingTable
+from acm.modelsdev import ModelsDev
+from acm.pricing import PricingTable
 
 CATALOGUE = {
     "openai": {

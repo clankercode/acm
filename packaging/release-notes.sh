@@ -16,7 +16,7 @@ version="${tag#v}"
 ref="$tag"
 git rev-parse -q --verify "refs/tags/$tag" >/dev/null || ref=HEAD
 prev="${2:-$(git describe --tags --abbrev=0 "$ref^" 2>/dev/null || true)}"
-repo="${GITHUB_REPOSITORY:-xertrov/codex-cache-monitor}"
+repo="${GITHUB_REPOSITORY:-clankercode/acm}"
 base="https://github.com/$repo"
 
 cat <<EOF
@@ -28,14 +28,14 @@ clients are comparable.
 ## Install
 
 \`\`\`
-uv tool install $base/releases/download/$tag/codex_cache_monitor-$version-py3-none-any.whl
-ccm serve
+uv tool install $base/releases/download/$tag/agent_cache_monitor-$version-py3-none-any.whl
+acm serve
 \`\`\`
 
 The wheel carries the built dashboard and a default rate table, so nothing else
 has to be installed and nothing has to be built. On first run it writes its
-database to \`~/.local/state/ccm\` and an editable copy of the rate table to
-\`~/.config/ccm/pricing.toml\`; every session corpus it reads is opened
+database to \`~/.local/state/acm\` and an editable copy of the rate table to
+\`~/.config/acm/pricing.toml\`; every session corpus it reads is opened
 read-only. The dashboard binds \`0.0.0.0:8808\`.
 
 To run it in the background instead, from a checkout of this tag:

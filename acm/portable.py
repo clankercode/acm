@@ -31,7 +31,10 @@ from typing import Any
 
 from .store import Store
 
-FORMAT = "ccm-export"
+FORMAT = "acm-export"
+#: Formats produced by previous versions of this tool, still accepted on import
+#: so a bundle exported by ccm can be read by acm. Exports always write FORMAT.
+_LEGACY_FORMATS = frozenset({"ccm-export"})
 VERSION = 1
 
 #: Column order for the bucket rows. Positional to keep the file small; the
@@ -284,7 +287,7 @@ def read_bundle(payload: Any) -> dict:
     """Validate a decoded bundle, or say precisely what is wrong with it."""
     if not isinstance(payload, dict):
         raise BundleError("not a JSON object")
-    if payload.get("format") != FORMAT:
+    if payload.get("format") not in (FORMAT, *_LEGACY_FORMATS):
         raise BundleError(
             f"not an Agent Cache Monitor export (format={payload.get('format')!r})"
         )

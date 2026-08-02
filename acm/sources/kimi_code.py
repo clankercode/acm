@@ -55,7 +55,7 @@ def project_name_from_path(path: Path) -> str:
     The path is ``.../wd_<name>_<hash>/session_<uuid>/agents/<agent>/wire.jsonl``.
     Kimi stores only the basename of the cwd plus a disambiguating hash, so the
     full path cannot be reconstructed -- but the basename is what
-    :func:`~ccm.sources.base.project_label` reduces to anyway.
+    :func:`~acm.sources.base.project_label` reduces to anyway.
     """
     for parent in path.parents:
         name = parent.name

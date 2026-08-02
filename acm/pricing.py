@@ -21,7 +21,7 @@ Two rate tiers exist. A request whose prompt exceeds the model's
 ``long_context_threshold`` is billed at long-context rates, which on the GPT-5.6
 family means double the input rate and 1.5x the output rate. Because the tier is
 a property of the individual request, it is part of the aggregation key -- see
-:mod:`ccm.aggregate` -- which keeps bucket-level costing exactly equal to
+:mod:`acm.aggregate` -- which keeps bucket-level costing exactly equal to
 summing per-request costs.
 """
 

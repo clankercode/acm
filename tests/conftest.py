@@ -19,8 +19,8 @@ from urllib.parse import quote
 
 import pytest
 
-from ccm.pricing import PricingTable
-from ccm.store import Store
+from acm.pricing import PricingTable
+from acm.store import Store
 
 
 def iso(ts: datetime) -> str:
@@ -639,7 +639,7 @@ class KimiCodeWire:
 
     session_id: str
     clock: datetime
-    project: str = "ccm-clients"
+    project: str = "acm-clients"
     agent: str = "main"
     model_alias: str = "kimi-code/kimi-for-coding"
     model: str = "kimi-for-coding"
@@ -936,7 +936,7 @@ def sessions_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def store(tmp_path: Path) -> Store:
-    s = Store(tmp_path / "ccm.sqlite")
+    s = Store(tmp_path / "acm.sqlite")
     yield s
     s.close()
 
