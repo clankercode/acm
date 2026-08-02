@@ -177,7 +177,7 @@ reset:
 
 # Remove every build product.
 clean:
-    rm -rf dist acm/_web web/dist web/tsconfig.tsbuildinfo .pytest_cache
+    rm -rf dist acm/_web ccm web/dist web/tsconfig.tsbuildinfo .pytest_cache
     find . -path ./.venv -prune -o -name __pycache__ -type d -print0 | xargs -0 rm -rf
 
 # --- release ----------------------------------------------------------------
