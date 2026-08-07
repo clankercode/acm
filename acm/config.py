@@ -36,12 +36,70 @@ _LEGACY_DB_NAME = "ccm.sqlite"
 _CURRENT_DB_NAME = "acm.sqlite"
 
 
-def migrate_legacy_ccm_paths() -> None:
-    """One-time rename of ccm-era state/config/cache dirs to acm.
+def _migrate_dir(old: Path, new: Path) -> None:
+    """Move ``old`` to ``new``, tolerating a target that already exists empty.
 
-    Runs before anything reads or writes those locations. If the new ``acm``
-    directory already exists, the old one is left alone -- the user has run
-    both versions and we will not guess which state wins.
+    An empty target is the normal case under systemd, not an edge case: the unit
+    declares ``StateDirectory=acm``, ``ConfigurationDirectory=acm`` and
+    ``CacheDirectory=acm``, and systemd creates all three *before* ExecStart. A
+    plain "skip if the target exists" test therefore never migrates the one
+    installation that most needs it -- the one running as a service -- and
+    strands the whole history in the ccm-era directory without a word.
+
+    The entries are moved individually rather than renaming the directory,
+    because that pre-created target can be a mount point in the service's
+    sandbox, and renaming onto one fails.
+
+    A target with anything in it is still left alone: that means both versions
+    have run and written state, and guessing which one wins is how you lose the
+    one that mattered.
+    """
+    if not old.is_dir() or old == new:
+        return
+    try:
+        if not new.exists():
+            old.rename(new)
+            _log.info("migrated %s -> %s", old, new)
+            return
+        if not new.is_dir():
+            _log.warning("cannot migrate %s: %s is not a directory", old, new)
+            return
+        existing = list(new.iterdir())
+        if existing:
+            _log.warning(
+                "not migrating %s: %s already holds %d entr%s; move them by hand "
+                "if the older state is the one you want",
+                old,
+                new,
+                len(existing),
+                "y" if len(existing) == 1 else "ies",
+            )
+            return
+        for entry in old.iterdir():
+            entry.rename(new / entry.name)
+        old.rmdir()
+        _log.info("migrated contents of %s -> %s", old, new)
+    except OSError as exc:
+        _log.warning("could not migrate %s -> %s: %s", old, new, exc)
+
+
+def _migrate_db_name(directory: Path) -> None:
+    """Rename ``ccm.sqlite`` and its SQLite sidecars to ``acm.sqlite``."""
+    for suffix in ("", "-wal", "-shm"):
+        old_db = directory / f"{_LEGACY_DB_NAME}{suffix}"
+        new_db = directory / f"{_CURRENT_DB_NAME}{suffix}"
+        if old_db.exists() and not new_db.exists():
+            try:
+                old_db.rename(new_db)
+                _log.info("migrated db %s -> %s", old_db, new_db)
+            except OSError as exc:
+                _log.warning("could not migrate db %s: %s", old_db, exc)
+
+
+def migrate_legacy_ccm_paths() -> None:
+    """One-time rename of ccm-era state/config/cache locations to acm.
+
+    Runs before anything reads or writes those locations.
     """
     for var, fallback in (
         ("XDG_STATE_HOME", ".local/state"),
@@ -50,28 +108,16 @@ def migrate_legacy_ccm_paths() -> None:
     ):
         raw = os.environ.get(var)
         base = Path(raw).expanduser() if raw else Path.home() / fallback
-        old = base / _LEGACY_DIR
-        new = base / _CURRENT_DIR
-        if not old.is_dir() or new.exists():
-            continue
-        try:
-            old.rename(new)
-            _log.info("migrated %s -> %s", old, new)
-        except OSError as exc:
-            _log.warning("could not migrate %s -> %s: %s", old, new, exc)
+        _migrate_dir(base / _LEGACY_DIR, base / _CURRENT_DIR)
 
     # Inside the state dir, the DB file and its SQLite sidecars were renamed too.
     raw = os.environ.get("XDG_STATE_HOME")
     state = Path(raw).expanduser() if raw else Path.home() / ".local/state"
-    for suffix in ("", "-wal", "-shm"):
-        old_db = state / _CURRENT_DIR / f"{_LEGACY_DB_NAME}{suffix}"
-        new_db = state / _CURRENT_DIR / f"{_CURRENT_DB_NAME}{suffix}"
-        if old_db.exists() and not new_db.exists():
-            try:
-                old_db.rename(new_db)
-                _log.info("migrated db %s -> %s", old_db, new_db)
-            except OSError as exc:
-                _log.warning("could not migrate db %s: %s", old_db, exc)
+    _migrate_db_name(state / _CURRENT_DIR)
+    # A checkout keeps its state in `data/` and never went near XDG, so the
+    # directory rename above cannot reach it -- only the file inside it moved.
+    if DEV_LAYOUT:
+        _migrate_db_name(PROJECT_ROOT / "data")
 
 
 def _xdg(var: str, fallback: str) -> Path:

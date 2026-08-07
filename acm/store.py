@@ -23,17 +23,30 @@ idempotent under arbitrary repetition and ordering. The shared contract is:
 
 from __future__ import annotations
 
+import json
+import logging
 import sqlite3
 import threading
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
+_log = logging.getLogger("acm.store")
+
 #: Bumped whenever the shape below changes -- or when the meaning of a value in
 #: it does, as in 4, where the Codex dedup key gained the per-request usage.
 #: Because everything here is derived, a mismatch is resolved by dropping and
 #: rebuilding rather than by migrating.
 SCHEMA_VERSION = "4"
+
+#: Bumped only when the *imported* tables change shape.
+#:
+#: Imported bundles are the one thing in this database that no rescan can
+#: rebuild: the machine they came from is somewhere else, and the bundle file
+#: is usually long gone. Versioning them separately is what stops an ordinary
+#: derived-schema bump -- which is to say, an ordinary upgrade -- from taking
+#: them with it.
+IMPORT_SCHEMA_VERSION = "1"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -390,27 +403,191 @@ DERIVED_TABLES = (
 IMPORT_TABLES = ("imports", "import_sessions")
 
 
-def _reset_if_stale(conn: sqlite3.Connection) -> bool:
-    """Drop derived tables when the schema shape has moved on.
+def _sidecar_for(path: Path) -> Path:
+    """Where imports are parked when they cannot be carried across a change.
 
-    Nothing here is a source of truth, so a version bump is cheaper to satisfy
-    by rebuilding than by migrating -- and a rebuild cannot leave the database
-    in a half-converted state that only shows up as wrong numbers later.
+    Named after the database rather than fixed, so two of them cannot collide.
+    """
+    return path.with_name(path.name + ".imports.json")
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> list[str]:
+    return [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+
+
+def _snapshot_imports(
+    conn: sqlite3.Connection,
+) -> dict[str, tuple[list[str], list[tuple]]]:
+    """Read out every import-derived row before the tables are dropped.
+
+    ``bucket_hour`` is in the list because it is shared: it holds this machine's
+    rollups, which a rescan rebuilds, alongside the imported ones, which nothing
+    rebuilds. Dropping the table for the sake of the former destroys the latter.
+    """
+    snapshot: dict[str, tuple[list[str], list[tuple]]] = {}
+    for table, where in (
+        ("imports", ""),
+        ("import_sessions", ""),
+        ("bucket_hour", " WHERE origin <> ''"),
+    ):
+        try:
+            cols = _columns(conn, table)
+            if not cols:
+                continue
+            rows = [
+                tuple(row)
+                for row in conn.execute(f"SELECT {', '.join(cols)} FROM {table}{where}")
+            ]
+        except sqlite3.Error as exc:  # a table shaped too differently to read
+            _log.warning("could not read %s while preserving imports: %s", table, exc)
+            continue
+        if rows:
+            snapshot[table] = (cols, rows)
+    return snapshot
+
+
+def _write_sidecar(
+    path: Path, snapshot: dict[str, tuple[list[str], list[tuple]]]
+) -> Path | None:
+    """Park a snapshot beside the database so a failed restore is not a loss."""
+    try:
+        payload = {
+            "written_by": SCHEMA_VERSION,
+            "tables": {
+                t: {"columns": c, "rows": [list(r) for r in rows]}
+                for t, (c, rows) in snapshot.items()
+            },
+        }
+        sidecar = _sidecar_for(path)
+        sidecar.write_text(json.dumps(payload))
+        return sidecar
+    except OSError as exc:
+        _log.error("could not write the import backup beside %s: %s", path, exc)
+        return None
+
+
+def _restore_imports(
+    conn: sqlite3.Connection,
+    snapshot: dict[str, tuple[list[str], list[tuple]]],
+    path: Path,
+) -> None:
+    """Put the snapshot back into the freshly created tables.
+
+    Columns the new schema no longer has are dropped on the way in; a row the
+    new schema will not accept at all leaves its whole table in the sidecar
+    rather than being silently half-restored.
+    """
+    for table, (cols, rows) in snapshot.items():
+        current = set(_columns(conn, table))
+        keep = [c for c in cols if c in current]
+        if not keep:
+            continue
+        index = [cols.index(c) for c in keep]
+        values = [tuple(row[i] for i in index) for row in rows]
+        try:
+            conn.executemany(
+                f"INSERT OR REPLACE INTO {table} ({', '.join(keep)}) "
+                f"VALUES ({', '.join('?' * len(keep))})",
+                values,
+            )
+        except sqlite3.Error as exc:
+            sidecar = _write_sidecar(path, snapshot)
+            _log.error(
+                "could not carry %s across the schema change: %s. The data is in %s "
+                "-- it is not derived from anything on this machine, so it cannot be "
+                "rescanned back",
+                table,
+                exc,
+                sidecar or "no backup (writing it failed too)",
+            )
+            continue
+        if len(keep) < len(cols):
+            _log.warning(
+                "carried %d %s rows across the schema change, without %s",
+                len(values),
+                table,
+                ", ".join(c for c in cols if c not in current),
+            )
+        else:
+            _log.info("carried %d %s rows across the schema change", len(values), table)
+
+
+def _reset_if_stale(
+    conn: sqlite3.Connection, path: Path
+) -> dict[str, tuple[list[str], list[tuple]]]:
+    """Drop the derived tables when the schema shape has moved on.
+
+    Nothing derived here is a source of truth, so a version bump is cheaper to
+    satisfy by rebuilding than by migrating -- and a rebuild cannot leave the
+    database in a half-converted state that only shows up as wrong numbers
+    later. Imports are the exception, and are carried across instead: see
+    :data:`IMPORT_SCHEMA_VERSION`.
+
+    Returns the rows the caller must put back once the schema exists again.
     """
     conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
-    row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
-    stored = row[0] if row else None
-    if stored == SCHEMA_VERSION:
-        return False
-    for table in DERIVED_TABLES + IMPORT_TABLES:
+    stored = {
+        row[0]: row[1]
+        for row in conn.execute(
+            "SELECT key, value FROM meta WHERE key IN ('schema_version', 'import_schema_version')"
+        )
+    }
+    if stored.get("schema_version") == SCHEMA_VERSION:
+        return {}
+
+    # A database written before imports were versioned separately is at version
+    # 1 by definition: that is the shape they had when the column was added.
+    imports_stale = stored.get("import_schema_version", "1") != IMPORT_SCHEMA_VERSION
+    snapshot = _snapshot_imports(conn)
+    drop = list(DERIVED_TABLES)
+    if imports_stale:
+        # Their own shape changed, so there is nowhere to put them back.
+        # Everything else here can be rescanned; this cannot, so it goes to a
+        # file on the way out rather than just vanishing.
+        drop += list(IMPORT_TABLES)
+        _park_unmigratable_imports(snapshot, path)
+        snapshot = {}
+    for table in drop:
         conn.execute(f"DROP TABLE IF EXISTS {table}")
     conn.execute("DELETE FROM meta WHERE key = 'bucket_fingerprint'")
-    conn.execute(
-        "INSERT INTO meta(key, value) VALUES ('schema_version', ?) "
+    rows = [
+        ("schema_version", SCHEMA_VERSION),
+        ("import_schema_version", IMPORT_SCHEMA_VERSION),
+    ]
+    if stored:
+        # An upgrade just threw away a corpus that took hours to read, and the
+        # rescan that replaces it takes hours more. Recording that says so on
+        # the dashboard for the whole of that time, instead of showing a
+        # near-empty history with nothing to explain it.
+        rows.append(("rebuild_pending", "1"))
+        _log.warning(
+            "schema %s -> %s: the derived tables were dropped and will be rebuilt "
+            "by rescanning the corpus",
+            stored.get("schema_version"),
+            SCHEMA_VERSION,
+        )
+    conn.executemany(
+        "INSERT INTO meta(key, value) VALUES (?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (SCHEMA_VERSION,),
+        rows,
     )
-    return stored is not None
+    return snapshot
+
+
+def _park_unmigratable_imports(
+    snapshot: dict[str, tuple[list[str], list[tuple]]], path: Path
+) -> None:
+    """Save the snapshot to a file, just before the import tables are dropped."""
+    if not snapshot:
+        return
+    sidecar = _write_sidecar(path, snapshot)
+    _log.error(
+        "the imported-data tables changed shape and cannot be migrated. "
+        "%d machine(s) worth of imported statistics were saved to %s before being "
+        "dropped; re-import the original bundles to get them back",
+        len(snapshot.get("imports", ([], []))[1]),
+        sidecar or "nowhere (writing the backup failed)",
+    )
 
 
 def connect(path: Path, *, read_only: bool = False) -> sqlite3.Connection:
@@ -426,8 +603,10 @@ def connect(path: Path, *, read_only: bool = False) -> sqlite3.Connection:
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA temp_store=MEMORY")
         conn.execute("PRAGMA mmap_size=268435456")
-        _reset_if_stale(conn)
+        carried = _reset_if_stale(conn, path)
         conn.executescript(SCHEMA)
+        if carried:
+            _restore_imports(conn, carried, path)
     conn.execute("PRAGMA busy_timeout=10000")
     return conn
 

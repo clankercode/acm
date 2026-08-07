@@ -14,6 +14,8 @@ log="${2:?usage: self-update.sh <checkout> <logfile>}"
 # "restart" only when the caller launched us somewhere that survives it.
 restart="${3:-norestart}"
 unit="acm.service"
+legacy_unit="ccm.service"
+unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
 mkdir -p "$(dirname "$log")"
 # Truncated, not appended: the log is a transcript of *this* attempt, and the
@@ -50,7 +52,34 @@ just setup || fail "just setup"
 just build || fail "just build"
 just install || fail "just install"
 
-if ! systemctl --user is-active --quiet "$unit"; then
+if systemctl --user is-active --quiet "$legacy_unit" || [ -e "$unit_dir/$legacy_unit" ]; then
+    # This box predates the ccm -> acm rename, so the process serving this page
+    # is the old unit under the old name. Without this it is never restarted,
+    # never replaced, and the panel says the update worked while the old build
+    # keeps running -- and the two units cannot simply coexist, since they bind
+    # the same port and share one state directory.
+    say "found the pre-rename $legacy_unit"
+    if [ "$restart" = norestart ]; then
+        # Retiring the old unit stops it, and without systemd-run this script is
+        # inside its cgroup -- it would be killed here, mid-migration, with the
+        # panel stuck on "Updating..." forever.
+        say "installed, but not migrating it from here: without systemd-run this"
+        say "script lives inside that service and would be killed part-way."
+        say "Run: just install-service && systemctl --user enable --now $unit"
+        say "done"
+        echo "status=partial" >"$log.done"
+        exit 0
+    fi
+    say "migrating it to $unit"
+    just install-service || fail "just install-service"
+    # Written before the unit starts: enabling it takes the port the old service
+    # is on, and nothing after that line is guaranteed to run.
+    say "done"
+    echo "status=ok" >"$log.done"
+    systemctl --user enable --now "$unit" || fail "systemctl --user enable --now $unit"
+    say "migrated $legacy_unit -> $unit"
+    exit 0
+elif ! systemctl --user is-active --quiet "$unit"; then
     # Not a failure, but not a finished update either: whatever is serving the
     # dashboard right now is still the old build, and saying "done" would be a
     # lie the panel repeats.

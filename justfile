@@ -12,6 +12,10 @@ set positional-arguments
 package  := "agent-cache-monitor"
 version  := `sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1`
 unit     := "acm.service"
+# The pre-rename names. Still handled so an upgrade over a ccm-era install does
+# not leave two services fighting over one port and one state directory.
+legacy_unit    := "ccm.service"
+legacy_package := "codex-cache-monitor"
 unit_dir := env("XDG_CONFIG_HOME", home_directory() / ".config") / "systemd/user"
 
 # List the recipes.
@@ -116,11 +120,34 @@ uninstall:
     uv tool uninstall {{package}}
 
 # Copy the systemd user unit into place without starting anything.
-install-service:
+install-service: retire-legacy-service
     mkdir -p {{unit_dir}}
     install -m 644 packaging/{{unit}} {{unit_dir}}/{{unit}}
     systemctl --user daemon-reload
     @echo "installed {{unit_dir}}/{{unit}}"
+
+# Stop and remove the pre-rename ccm.service, if this box still has one.
+retire-legacy-service:
+    #!/usr/bin/env bash
+    # Not optional housekeeping. Both units serve on 8808, so leaving the old
+    # one enabled means whichever loses the race crash-loops on a bound port;
+    # and the old one holds the ccm-era state directory open, which is exactly
+    # what the new one has to migrate. No state is touched here -- `acm` moves
+    # it on its first run, and it can only do that once nothing has it open.
+    set -euo pipefail
+    if [ ! -e "{{unit_dir}}/{{legacy_unit}}" ] && \
+       ! systemctl --user list-unit-files --no-legend "{{legacy_unit}}" 2>/dev/null | grep -q .; then
+        exit 0
+    fi
+    echo "found the pre-rename {{legacy_unit}}; retiring it"
+    systemctl --user disable --now {{legacy_unit}} 2>/dev/null || true
+    rm -f "{{unit_dir}}/{{legacy_unit}}"
+    systemctl --user daemon-reload
+    echo "retired {{legacy_unit}}"
+    if uv tool list 2>/dev/null | grep -q '^{{legacy_package}} '; then
+        echo "note: the old '{{legacy_package}}' tool is still installed and still owns"
+        echo "      the 'ccm' command. Remove it with: uv tool uninstall {{legacy_package}}"
+    fi
 
 # Build, install, start now, and start at boot. The one command for a new box.
 enable: install install-service
@@ -163,12 +190,24 @@ uninstall-service:
 
 # Pull, rebuild, reinstall, and restart the service if it is running.
 update:
+    #!/usr/bin/env bash
+    set -euo pipefail
     git pull --ff-only
     just setup build install
-    @if systemctl --user is-active --quiet {{unit}}; then \
-        systemctl --user restart {{unit}} && echo "restarted {{unit}}"; \
-    else \
-        echo "{{unit}} is not running; nothing to restart"; \
+    # Checked before the restart below, because on a ccm-era box the answer to
+    # "is acm.service running" is no while a service very much is: the old one.
+    # Reporting "nothing to restart" there leaves the machine serving the build
+    # from before the update, indefinitely and without saying so.
+    if systemctl --user is-active --quiet {{legacy_unit}} || [ -e "{{unit_dir}}/{{legacy_unit}}" ]; then
+        just install-service
+        systemctl --user enable --now {{unit}}
+        echo "migrated {{legacy_unit}} -> {{unit}}"
+        exit 0
+    fi
+    if systemctl --user is-active --quiet {{unit}}; then
+        systemctl --user restart {{unit}} && echo "restarted {{unit}}"
+    else
+        echo "{{unit}} is not running; nothing to restart"
     fi
 
 # Delete the derived database. Rescanning rebuilds it.

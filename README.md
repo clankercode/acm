@@ -64,12 +64,22 @@ If you installed the previous `ccm` tool, the new `acm` automatically migrates
 your state on first run: `~/.local/state/ccm`, `~/.config/ccm`, and
 `~/.cache/ccm` are renamed to their `acm` equivalents, including the database
 (`ccm.sqlite` → `acm.sqlite`). Your pricing table and env file are preserved.
+A checkout's `data/ccm.sqlite` is renamed in place too.
+
+`just update` and `just enable` retire a running `ccm.service` for you, and so
+does the dashboard's Update button. That step is not optional: both units serve
+on the same port and share one state directory, so a box left with both enabled
+has one of them crash-looping and the other holding the database the new one is
+trying to migrate. The migration itself only proceeds into an `acm` directory
+that is absent or empty — systemd's `StateDirectory=` creates an empty one
+before the service starts, which is expected and fine, but a directory with
+state already in it means both versions have run and is left for you to resolve.
 
 To clean up the old install:
 
 ```
 uv tool uninstall codex-cache-monitor
-systemctl --user disable --now ccm.service   # if you used the service
+systemctl --user disable --now ccm.service   # if `just` did not already
 rm ~/.config/systemd/user/ccm.service
 ```
 
@@ -438,7 +448,15 @@ scanner treats them identically and reports progress per client.
 
 All state lives in one SQLite file. Deleting it
 and rescanning reproduces it exactly; a schema version bump does that
-automatically rather than migrating, since nothing here is a source of truth.
+automatically rather than migrating, since nothing derived here is a source of
+truth. Imported bundles are the exception — no rescan can rebuild another
+machine's corpus — so they carry their own `IMPORT_SCHEMA_VERSION` and are
+copied across an ordinary bump instead of dropped with everything else. On the
+rare bump that changes their own shape, they are written to
+`<database>.imports.json` on the way out rather than simply lost. A wipe also
+sets `rebuild_pending`, so the dashboard says the corpus is being re-read for
+as long as that takes, across restarts, instead of showing a near-empty history
+with no explanation.
 
 The hourly rollup is a materialised view keyed by `(hour, origin, source, model,
 provider, repo, is_subagent, long_ctx)`. Stale hours are tracked by trigger —

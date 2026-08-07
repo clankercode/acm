@@ -68,6 +68,13 @@ class Engine:
             # The phase is left to the worker's first turn round the loop, which
             # is what broadcasts it; setting it here would make `_enter_paused`
             # think it had already announced itself.
+        # Also restored, and for the same reason the pause is: a rebuild that
+        # has not finished outlives the process that started it. Kept in memory
+        # only, the warning that the corpus is *mid-rebuild* disappears at the
+        # first restart and a half-read corpus starts reading as a complete
+        # history that has lost most of its rows.
+        if self.store.get_meta("rebuild_pending") == "1":
+            self.scanner.progress.rebuild_pending = True
         # Pause is a read-modify-write over two pieces of state, and the
         # endpoints that drive it run on the threadpool, so two clicks or two
         # tabs really do arrive at once.
@@ -299,6 +306,7 @@ class Engine:
             return False
         # The corpus has been read through, so a rebuild that was owed is done.
         progress.rebuild_pending = False
+        self.store.set_meta("rebuild_pending", "0")
         return True
 
     def _refresh_derived(self, force: bool = False) -> None:
@@ -437,6 +445,10 @@ class Engine:
                     else:
                         conn.execute(f"DELETE FROM {table}")
                 conn.execute("DELETE FROM meta WHERE key = 'bucket_fingerprint'")
+                conn.execute(
+                    "INSERT INTO meta(key, value) VALUES ('rebuild_pending', '1') "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+                )
                 conn.execute("COMMIT")
             except Exception:
                 conn.execute("ROLLBACK")
