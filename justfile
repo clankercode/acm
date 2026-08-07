@@ -120,11 +120,28 @@ uninstall:
     uv tool uninstall {{package}}
 
 # Copy the systemd user unit into place without starting anything.
-install-service: retire-legacy-service
+install-service: retire-legacy-service migrate-state
     mkdir -p {{unit_dir}}
     install -m 644 packaging/{{unit}} {{unit_dir}}/{{unit}}
     systemctl --user daemon-reload
     @echo "installed {{unit_dir}}/{{unit}}"
+
+# Move ccm-era state into place, before the unit is ever started.
+migrate-state:
+    #!/usr/bin/env bash
+    # Deliberately run here, from a normal shell, and not left to the service's
+    # own first run. systemd creates StateDirectory=acm as a *symlink to the
+    # configuration directory* when the state directory does not exist yet and
+    # a configuration directory of the same name does -- a shim for units that
+    # predate the split -- and the whole history then lands under ~/.config.
+    # Migrating first means the directory is already there and systemd leaves
+    # it alone. Once migrated this is a no-op, so it is safe on every install.
+    set -euo pipefail
+    if command -v acm >/dev/null; then
+        acm migrate
+    else
+        echo "acm is not on PATH yet; skipping the state migration"
+    fi
 
 # Stop and remove the pre-rename ccm.service, if this box still has one.
 retire-legacy-service:

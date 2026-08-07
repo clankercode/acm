@@ -48,7 +48,9 @@ def _migrate_dir(old: Path, new: Path) -> None:
 
     The entries are moved individually rather than renaming the directory,
     because that pre-created target can be a mount point in the service's
-    sandbox, and renaming onto one fails.
+    sandbox -- renaming onto one fails, and renaming *into* one crosses a
+    device boundary, so the move needs the copy-and-delete fallback that
+    :func:`shutil.move` has and :meth:`Path.rename` does not.
 
     A target with anything in it is still left alone: that means both versions
     have run and written state, and guessing which one wins is how you lose the
@@ -57,9 +59,23 @@ def _migrate_dir(old: Path, new: Path) -> None:
     if not old.is_dir() or old == new:
         return
     try:
-        if not new.exists():
+        if not new.exists() and not new.is_symlink():
             old.rename(new)
             _log.info("migrated %s -> %s", old, new)
+            return
+        if new.is_symlink():
+            # systemd makes one of these when StateDirectory= is missing but a
+            # ConfigurationDirectory= of the same name exists: it assumes an
+            # upgrade from a version that kept state in the config directory.
+            # Migrating into it would file the whole history under ~/.config.
+            _log.warning(
+                "not migrating %s: %s is a symlink to %s. Stop the service, "
+                "delete the symlink, and run `acm migrate` before starting it "
+                "again -- state does not belong in the configuration directory",
+                old,
+                new,
+                new.resolve(),
+            )
             return
         if not new.is_dir():
             _log.warning("cannot migrate %s: %s is not a directory", old, new)
@@ -76,7 +92,7 @@ def _migrate_dir(old: Path, new: Path) -> None:
             )
             return
         for entry in old.iterdir():
-            entry.rename(new / entry.name)
+            shutil.move(str(entry), str(new / entry.name))
         old.rmdir()
         _log.info("migrated contents of %s -> %s", old, new)
     except OSError as exc:

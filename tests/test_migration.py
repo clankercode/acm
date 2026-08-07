@@ -104,6 +104,49 @@ def test_leaves_a_target_that_already_holds_state(xdg: Path) -> None:
     assert (xdg / "state" / "ccm" / "ccm.sqlite").read_text() == "history"
 
 
+def test_migrates_across_a_device_boundary(
+    xdg: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pre-created target is a bind mount in the service's sandbox.
+
+    ``rename`` cannot cross that boundary; the move has to fall back to copy and
+    delete. This came up on the first real cutover, on ``~/.cache/acm``.
+    """
+    _legacy_state(xdg)
+    (xdg / "state" / "acm").mkdir()
+
+    real_rename = Path.rename
+
+    def rename_across_devices(self: Path, target):
+        if self.parent.name == "ccm":
+            raise OSError(18, "Invalid cross-device link")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename_across_devices)
+    config.migrate_legacy_ccm_paths()
+    monkeypatch.undo()
+
+    assert (xdg / "state" / "acm" / "acm.sqlite").read_text() == "history"
+    assert not (xdg / "state" / "ccm").exists()
+
+
+def test_refuses_a_target_systemd_turned_into_a_symlink(xdg: Path) -> None:
+    """StateDirectory= missing + ConfigurationDirectory= present makes one.
+
+    Following it would file the database under ~/.config, so the migration
+    stops and says which symlink to remove.
+    """
+    _legacy_state(xdg)
+    (xdg / "config" / "acm").mkdir(parents=True)
+    (xdg / "state" / "acm").symlink_to(xdg / "config" / "acm")
+
+    config.migrate_legacy_ccm_paths()
+
+    assert (xdg / "state" / "ccm" / "ccm.sqlite").read_text() == "history"
+    assert not (xdg / "config" / "acm" / "acm.sqlite").exists()
+    assert not (xdg / "config" / "acm" / "ccm.sqlite").exists()
+
+
 def test_migration_is_idempotent(xdg: Path) -> None:
     _legacy_state(xdg)
     config.migrate_legacy_ccm_paths()

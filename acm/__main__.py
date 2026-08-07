@@ -115,6 +115,38 @@ def cmd_reset(args, settings) -> int:
     return 0
 
 
+def cmd_migrate(args, settings) -> int:
+    """Move ccm-era state into place, and say where everything ended up.
+
+    The migration itself is ``bootstrap``, which every subcommand runs. This one
+    exists so it can be run *deliberately*, at a moment of the caller's
+    choosing: before the systemd unit starts for the first time.
+
+    That timing is not a nicety. When ``StateDirectory=acm`` names a directory
+    that does not exist yet while ``ConfigurationDirectory=acm`` does, systemd
+    creates the state directory as a *symlink to the configuration directory* --
+    a compatibility shim for units that predate the split. Migrate first and the
+    directory is already there, so systemd finds it, leaves it alone, and the
+    database stays in the state directory where it belongs.
+    """
+    for label, path in (
+        ("database", settings.db_path),
+        ("pricing", settings.pricing_path),
+        ("reference", settings.reference_path),
+    ):
+        exists = "" if path.exists() else "  (not created yet)"
+        print(f"  {label:<10}{path}{exists}")
+    state = settings.db_path.parent
+    if state.is_symlink():
+        print(
+            f"\nwarning: {state} is a symlink to {state.resolve()}. Stop the "
+            "service, delete the symlink, and run this again.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
 def cmd_export(args, settings) -> int:
     """Write a portable bundle, or the old summary dump with --summary."""
     store = Store(settings.db_path)
@@ -274,6 +306,9 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("models", help="per-model table").set_defaults(func=cmd_models)
     sub.add_parser("reset", help="delete derived state").set_defaults(func=cmd_reset)
+    sub.add_parser(
+        "migrate", help="move ccm-era state into place and report where it is"
+    ).set_defaults(func=cmd_migrate)
 
     p_export = sub.add_parser("export", help="write a portable stats bundle")
     p_export.add_argument("-o", "--out", type=Path, help="write here instead of stdout")

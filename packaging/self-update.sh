@@ -71,6 +71,10 @@ if systemctl --user is-active --quiet "$legacy_unit" || [ -e "$unit_dir/$legacy_
         exit 0
     fi
     say "migrating it to $unit"
+    # Retires the old unit and moves the ccm-era state across before anything
+    # starts. Both have to happen with no server running: the old one holds the
+    # database open, and the state directory has to exist before systemd looks
+    # for it.
     just install-service || fail "just install-service"
     # Written before the unit starts: enabling it takes the port the old service
     # is on, and nothing after that line is guaranteed to run.
